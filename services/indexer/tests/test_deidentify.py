@@ -182,3 +182,9 @@ def test_institution_missing(make_ds: Callable[..., Dataset], salt: bytes) -> No
 def test_positive_offset_refused(salt: bytes) -> None:
     with pytest.raises(ValueError, match="past"):
         Deidentifier(DeidConfig(salt=salt, project="P", offset_days=5))
+
+
+def test_method_description_fits_lo_vr() -> None:
+    from scoutoss_indexer.deid.deidentify import METHOD_DESCRIPTION
+
+    assert len(METHOD_DESCRIPTION) <= 64 and METHOD_VERSION in METHOD_DESCRIPTION

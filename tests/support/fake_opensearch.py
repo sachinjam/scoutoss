@@ -171,6 +171,15 @@ def _aggregate(docs: list[dict[str, Any]], aggs: dict[str, Any]) -> dict[str, An
             else:
                 fn = {"avg": lambda x: sum(x) / len(x), "min": min, "max": max, "sum": sum}[kind]
                 out[name] = {"value": fn(nums)}
+        elif kind == "stats":
+            nums = [float(v) for d in docs for v in _values(d, params["field"])]
+            out[name] = {
+                "count": len(nums),
+                "min": min(nums) if nums else None,
+                "max": max(nums) if nums else None,
+                "avg": sum(nums) / len(nums) if nums else None,
+                "sum": sum(nums),
+            }
         elif kind == "filter":
             out[name] = {"doc_count": sum(matches(d, params) for d in docs)}
         else:

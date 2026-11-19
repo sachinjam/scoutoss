@@ -16,9 +16,8 @@ from scoutoss_indexer.deid.profile import ACTIONS, METHOD_CODES, REJECTED_MODALI
 from scoutoss_indexer.deid.pseudonym import hash_uid, pseudonymize, short_hash, site_code
 
 METHOD_VERSION = "ScoutOSS-DEID-1"
-METHOD_DESCRIPTION = (
-    f"{METHOD_VERSION}: PS3.15 Basic + RetainLongModifDates + RetainPatChars + CleanDesc"
-)
+# DeidentificationMethod is LO (max 64 chars); the full profile is in the code sequence.
+METHOD_DESCRIPTION = f"{METHOD_VERSION} PS3.15 Basic+RetLongModifDates+RetPatChars+CleanDesc"[:64]
 
 
 class DeidRejected(Exception):

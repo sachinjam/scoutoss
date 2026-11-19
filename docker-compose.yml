@@ -319,6 +319,37 @@ services:
       scout-db: { condition: service_healthy }
       opensearch: { condition: service_healthy }
 
+  copilot:
+    <<: *hardening
+    build: { context: ., dockerfile: services/copilot/Dockerfile }
+    image: scoutoss/copilot:${SCOUTOSS_TAG:-dev}
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      <<: *python-env
+      PORT: "8000"
+      AUTH_AUDIENCE: scoutoss-copilot
+      DATABASE_URL: postgresql://copilot_app:${COPILOT_DB_PASSWORD}@scout-db:5432/scoutoss
+      INDEXER_URL: http://indexer:8000
+      TOKEN_URL: http://keycloak:8080/realms/scoutoss/protocol/openid-connect/token
+      CLIENT_ID: scoutoss-copilot
+      CLIENT_SECRET: ${KC_COPILOT_CLIENT_SECRET}
+      XNAT_PIPELINE_USER: scout_pipeline
+      XNAT_PIPELINE_PASSWORD: ${XNAT_PIPELINE_PASSWORD}
+      LLM_PROVIDER: ${LLM_PROVIDER:-heuristic}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-10-21}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+    labels: { scoutoss.service: copilot }
+    depends_on:
+      scout-db: { condition: service_healthy }
+      opensearch: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+
   # ------------------------------------------------------------------ one-shot bootstrap jobs
   opensearch-setup:
     image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}

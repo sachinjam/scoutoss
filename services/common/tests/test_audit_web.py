@@ -54,6 +54,29 @@ def test_params_hash_is_canonical() -> None:
     assert params_hash(None) != params_hash({})
 
 
+def test_request_log_carries_user_pseudonym() -> None:
+    import io
+    import json
+
+    from scoutoss_common.auth import Principal
+    from scoutoss_common.logging import configure_logging
+
+    stream = io.StringIO()
+    configure_logging("websvc", env="test", stream=stream)
+    app = FastAPI()
+    install_observability(app, "websvc")
+
+    @app.get("/who")
+    def who(request: Request) -> dict[str, str]:
+        request.state.principal = Principal(subject="abc", username="u")
+        return {"ok": "1"}
+
+    TestClient(app).get("/who")
+    rec = [json.loads(line) for line in stream.getvalue().splitlines() if '"request"' in line][-1]
+    assert rec["user_id"].startswith("u_") and rec["endpoint"] == "/who" and rec["status"] == 200
+    assert "latency_ms" in rec and "abc" not in json.dumps(rec)
+
+
 def test_middleware_metrics_and_request_id() -> None:
     app = FastAPI()
     install_observability(app, "websvc")

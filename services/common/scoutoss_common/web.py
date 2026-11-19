@@ -53,10 +53,14 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             HTTP_REQUESTS.labels(self.service, request.method, endpoint, str(status)).inc()
             HTTP_LATENCY.labels(self.service, request.method, endpoint).observe(elapsed)
             if endpoint not in _QUIET:
+                # Sync handlers run in a worker thread, so contextvars bound during auth do
+                # not flow back here; the principal is carried on request.state instead.
+                principal = getattr(request.state, "principal", None)
                 log.info(
                     "request",
                     status=status,
                     latency_ms=round(elapsed * 1000, 2),
+                    user_id=getattr(principal, "pseudonym", None),
                 )
 
 
