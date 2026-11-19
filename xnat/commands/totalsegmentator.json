@@ -1,0 +1,45 @@
+{
+  "name": "totalsegmentator",
+  "label": "TotalSegmentator",
+  "description": "Segments 117 anatomical structures in CT (Wasserthal et al., Radiology: AI 2023). Output: NIfTI masks as a TOTALSEG scan resource.",
+  "version": "2.4.0",
+  "schema-version": "1.0",
+  "info-url": "https://github.com/wasserth/TotalSegmentator",
+  "image": "wasserth/totalsegmentator:2.4.0",
+  "type": "docker",
+  "command-line": "TotalSegmentator -i /input -o /output/segmentations --ml #FAST#",
+  "override-entrypoint": true,
+  "mounts": [
+    {"name": "in", "writable": false, "path": "/input"},
+    {"name": "out", "writable": true, "path": "/output"}
+  ],
+  "environment-variables": {},
+  "ports": {},
+  "inputs": [
+    {"name": "FAST", "type": "boolean", "default-value": "true", "required": false,
+     "replacement-key": "#FAST#", "true-value": "--fast", "false-value": ""}
+  ],
+  "outputs": [
+    {"name": "segmentations", "description": "Multi-label NIfTI segmentation", "required": true,
+     "mount": "out", "path": "segmentations"}
+  ],
+  "xnat": [
+    {
+      "name": "totalsegmentator-scan",
+      "label": "TotalSegmentator (CT scan)",
+      "description": "Run TotalSegmentator on one CT scan's DICOM resource",
+      "contexts": ["xnat:imageScanData"],
+      "external-inputs": [
+        {"name": "scan", "type": "Scan", "required": true, "matcher": "@.modality == 'CT'"}
+      ],
+      "derived-inputs": [
+        {"name": "scan-dicom", "type": "Resource", "required": true, "derived-from-wrapper-input": "scan",
+         "matcher": "@.label == 'DICOM'", "provides-files-for-command-mount": "in"}
+      ],
+      "output-handlers": [
+        {"name": "segmentation-resource", "accepts-command-output": "segmentations",
+         "as-a-child-of": "scan", "type": "Resource", "label": "TOTALSEG"}
+      ]
+    }
+  ]
+}

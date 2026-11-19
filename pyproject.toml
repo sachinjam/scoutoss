@@ -1,0 +1,96 @@
+[project]
+name = "scoutoss"
+version = "0.1.0"
+description = "ScoutOSS — open-source clinical research data exploration on XNAT"
+requires-python = ">=3.12,<3.13"
+license = "Apache-2.0"
+dependencies = [
+    "scoutoss-common",
+    "scoutoss-indexer",
+    "scoutoss-copilot",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["services/common", "services/indexer", "services/copilot"]
+
+[tool.uv.sources]
+scoutoss-common = { workspace = true }
+scoutoss-indexer = { workspace = true }
+scoutoss-copilot = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "respx>=0.21",
+    "testcontainers[postgres,opensearch]>=4.8",
+    "types-requests",
+    "freezegun>=1.5",
+]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["services/ui", "helm", "dashboards"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "C4", "SIM", "RUF", "N", "PT", "ASYNC"]
+ignore = [
+    "S101",  # assert is fine in tests
+    "S311",  # random used only for non-crypto jitter
+    "B008",  # FastAPI Depends() in defaults is idiomatic
+    "E501",  # line length is the formatter's job
+    "N818",  # domain exception names (DeidRejected, PHILeakError) read better without "Error"
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S105", "S106", "S108", "S603", "S607", "N802", "PT018", "PT022"]
+"tests/support/**" = ["C901", "PLR0912"]
+"scripts/**" = ["S603", "S607", "S310", "S113"]
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+mypy_path = ["services/common", "services/indexer", "services/copilot"]
+explicit_package_bases = true
+exclude = ["/tests/", "^scripts/"]
+
+[[tool.mypy.overrides]]
+module = ["pynetdicom.*", "opensearchpy.*", "hl7.*", "testcontainers.*", "vl_convert.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: needs Postgres + OpenSearch (testcontainers or docker-compose.test.yml)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:opensearchpy.*",
+    "ignore:Using `httpx` with `starlette.testclient`",
+    "ignore::UserWarning:pydicom.*",
+]
+
+# ---------------------------------------------------------------- coverage
+[tool.coverage.run]
+branch = true
+source = ["scoutoss_common", "scoutoss_indexer", "scoutoss_copilot"]
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]
+
+[tool.ruff.lint.isort]
+known-first-party = ["scoutoss_common", "scoutoss_indexer", "scoutoss_copilot", "tests"]

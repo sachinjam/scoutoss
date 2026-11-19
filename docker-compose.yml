@@ -1,0 +1,381 @@
+# ScoutOSS development stack. `make up` generates .env + TLS certs, fetches XNAT plugins,
+# then runs `docker compose up -d --build --wait`.
+# Only nginx (HTTPS), the de-identification gateway (DICOM) and Mirth (MLLP) publish
+# ports, and only on 127.0.0.1. Everything else is reachable only on the internal network.
+name: scoutoss
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5", labels: "scoutoss.service" }
+
+x-python-env: &python-env
+  ENV: ${ENV:-dev}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  OPENSEARCH_URL: http://opensearch:9200
+  DEFAULT_PROJECT: ${DEFAULT_PROJECT:-SCOUT_DEMO}
+  AUTH_ISSUER: https://auth.localhost:${HTTPS_PORT:-24443}/realms/scoutoss
+  AUTH_JWKS_URL: http://keycloak:8080/realms/scoutoss/protocol/openid-connect/certs
+  XNAT_URL: http://xnat-web:8080
+  XNAT_PUBLIC_URL: https://xnat.localhost:${HTTPS_PORT:-24443}
+
+services:
+  # ------------------------------------------------------------------ edge
+  proxy:
+    <<: *hardening
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    ports:
+      - "127.0.0.1:${HTTPS_PORT:-24443}:8443"
+    environment:
+      HTTPS_PORT: ${HTTPS_PORT:-24443}
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
+    volumes:
+      - ./infra/nginx/templates:/etc/nginx/templates:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+    labels: { scoutoss.service: proxy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider --no-check-certificate https://127.0.0.1:8443/ 2>&1 | grep -q 301 || nc -z 127.0.0.1 8443"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      keycloak: { condition: service_healthy }
+
+  # ------------------------------------------------------------------ databases
+  scout-db:
+    <<: *hardening
+    image: postgres:15.20-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      SCOUT_APP_DB_PASSWORD: ${SCOUT_APP_DB_PASSWORD}
+      DEID_DB_PASSWORD: ${DEID_DB_PASSWORD}
+      COPILOT_DB_PASSWORD: ${COPILOT_DB_PASSWORD}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      MIRTH_DB_PASSWORD: ${MIRTH_DB_PASSWORD}
+    volumes:
+      - ./infra/postgres/init.sh:/docker-entrypoint-initdb.d/10-scoutoss.sh:ro
+      - scout-db:/var/lib/postgresql/data
+    labels: { scoutoss.service: scout-db }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d scoutoss"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  xnat-db:
+    <<: *hardening
+    image: postgres:15.20-alpine
+    environment:
+      POSTGRES_DB: xnat
+      POSTGRES_USER: xnat
+      POSTGRES_PASSWORD: ${XNAT_DB_PASSWORD}
+    volumes:
+      - xnat-db:/var/lib/postgresql/data
+    labels: { scoutoss.service: xnat-db }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xnat -d xnat"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # ------------------------------------------------------------------ XNAT archive of record
+  xnat-web:
+    <<: *hardening
+    image: ghcr.io/nrgxnat/xnat:1.10.2.1
+    platform: linux/amd64
+    entrypoint: ["/bin/sh", "/usr/local/bin/xnat-start.sh"]
+    user: "1000:1000"
+    environment:
+      CATALINA_OPTS: -Xms512m -Xmx${XNAT_MAX_HEAP:-3g} -Dxnat.home=/data/xnat/home
+      XNAT_HOME: /data/xnat/home
+      XNAT_DB_PASSWORD: ${XNAT_DB_PASSWORD}
+      XNAT_PUBLIC_URL: https://xnat.localhost:${HTTPS_PORT:-24443}
+      TZ: Etc/UTC
+    volumes:
+      - ./xnat/xnat-start.sh:/usr/local/bin/xnat-start.sh:ro
+      - ./xnat/plugins:/plugins:ro
+      - xnat-home:/data/xnat/home
+      - xnat-archive:/data/xnat/archive
+      - xnat-prearchive:/data/xnat/prearchive
+      - xnat-build:/data/xnat/build
+      - xnat-cache:/data/xnat/cache
+    labels: { scoutoss.service: xnat-web }
+    depends_on:
+      xnat-db: { condition: service_healthy }
+      job-engine: { condition: service_started }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8080/xapi/siteConfig/buildInfo -w '%{http_code}' | grep -qE '200|401' || curl -fsS -o /dev/null http://localhost:8080/"]
+      interval: 20s
+      timeout: 15s
+      retries: 60
+      start_period: 900s
+
+  # Isolated Docker engine for XNAT Container Service jobs (XNAT never gets the host socket).
+  job-engine:
+    restart: unless-stopped
+    image: docker:29.0.4-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command: ["dockerd", "--host=tcp://0.0.0.0:2375", "--host=unix:///var/run/docker.sock", "--tls=false"]
+    volumes:
+      - job-engine:/var/lib/docker
+      - xnat-archive:/data/xnat/archive
+      - xnat-build:/data/xnat/build
+    labels: { scoutoss.service: job-engine }
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # ------------------------------------------------------------------ search
+  opensearch:
+    <<: *hardening
+    image: opensearchproject/opensearch:2.19.3
+    environment:
+      discovery.type: single-node
+      cluster.name: scoutoss
+      bootstrap.memory_lock: "false"
+      OPENSEARCH_JAVA_OPTS: -Xms1g -Xmx1g
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"   # dev only; Helm enables the security plugin + TLS
+      action.auto_create_index: "-dicom_*,-clinical_events,-audit,+*"
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - opensearch:/usr/share/opensearch/data
+    labels: { scoutoss.service: opensearch }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  opensearch-dashboards:
+    <<: *hardening
+    image: opensearchproject/opensearch-dashboards:2.19.3
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+      SERVER_BASEPATH: /dashboards
+      SERVER_REWRITEBASEPATH: "true"
+      SERVER_PUBLICBASEURL: https://app.localhost:${HTTPS_PORT:-24443}/dashboards
+    labels: { scoutoss.service: opensearch-dashboards }
+    depends_on:
+      opensearch: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5601/dashboards/api/status | grep -q '\"state\":\"green\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+
+  # ------------------------------------------------------------------ identity
+  keycloak:
+    <<: *hardening
+    image: quay.io/keycloak/keycloak:26.8.2
+    command:
+      - start
+      - --import-realm
+      - --http-enabled=true
+      - --hostname=https://auth.localhost:${HTTPS_PORT:-24443}
+      - --hostname-backchannel-dynamic=true
+      - --proxy-headers=xforwarded
+      - --health-enabled=true
+      - --metrics-enabled=true
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://scout-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_LOG_CONSOLE_OUTPUT: json
+      HTTPS_PORT: ${HTTPS_PORT:-24443}
+      KC_COPILOT_CLIENT_SECRET: ${KC_COPILOT_CLIENT_SECRET}
+      KC_INDEXER_CLIENT_SECRET: ${KC_INDEXER_CLIENT_SECRET}
+      KC_MIRTH_CLIENT_SECRET: ${KC_MIRTH_CLIENT_SECRET}
+      KC_DASHBOARDS_CLIENT_SECRET: ${KC_DASHBOARDS_CLIENT_SECRET}
+      KC_NOTEBOOKS_CLIENT_SECRET: ${KC_NOTEBOOKS_CLIENT_SECRET}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD}
+    volumes:
+      - ./infra/keycloak/realm.json:/opt/keycloak/data/import/scoutoss-realm.json:ro
+    labels: { scoutoss.service: keycloak }
+    depends_on:
+      scout-db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  oauth2-proxy:
+    <<: *hardening
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.6
+    command:
+      - --provider=keycloak-oidc
+      - --client-id=scoutoss-dashboards
+      - --skip-oidc-discovery=true
+      - --oidc-issuer-url=https://auth.localhost:${HTTPS_PORT:-24443}/realms/scoutoss
+      - --login-url=https://auth.localhost:${HTTPS_PORT:-24443}/realms/scoutoss/protocol/openid-connect/auth
+      - --redeem-url=http://keycloak:8080/realms/scoutoss/protocol/openid-connect/token
+      - --oidc-jwks-url=http://keycloak:8080/realms/scoutoss/protocol/openid-connect/certs
+      - --validate-url=http://keycloak:8080/realms/scoutoss/protocol/openid-connect/userinfo
+      - --redirect-url=https://app.localhost:${HTTPS_PORT:-24443}/oauth2/callback
+      - --code-challenge-method=S256
+      - --allowed-role=viewer
+      - --allowed-role=researcher
+      - --allowed-role=admin
+      - --email-domain=*
+      - --reverse-proxy=true
+      - --set-xauthrequest=true
+      - --cookie-secure=true
+      - --cookie-samesite=lax
+      - --cookie-expire=8h
+      - --whitelist-domain=app.localhost:${HTTPS_PORT:-24443}
+      - --upstream=static://202
+      - --http-address=0.0.0.0:4180
+      - --skip-provider-button=true
+      - --insecure-oidc-allow-unverified-email=true
+    environment:
+      OAUTH2_PROXY_CLIENT_SECRET: ${KC_DASHBOARDS_CLIENT_SECRET}
+      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET}
+    labels: { scoutoss.service: oauth2-proxy }
+    depends_on:
+      keycloak: { condition: service_healthy }
+
+  # ------------------------------------------------------------------ observability
+  jaeger:
+    <<: *hardening
+    image: jaegertracing/jaeger:2.19.0
+    command: ["--config", "/etc/jaeger/config.yaml"]
+    volumes:
+      - ./infra/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+    labels: { scoutoss.service: jaeger }
+
+  # ------------------------------------------------------------------ ScoutOSS services
+  deid-gateway:
+    <<: *hardening
+    build: { context: ., dockerfile: services/indexer/Dockerfile }
+    image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}
+    command: ["scoutoss-indexer", "gateway"]
+    read_only: true
+    tmpfs: [/tmp]
+    ports:
+      - "127.0.0.1:${DICOM_PORT:-24112}:11112"
+    environment:
+      <<: *python-env
+      PORT: "8001"
+      GATEWAY_AE_TITLE: SCOUTGW
+      GATEWAY_PORT: "11112"
+      GATEWAY_SPOOL: /spool
+      XNAT_DICOM_HOST: xnat-web
+      XNAT_DICOM_PORT: "8104"
+      XNAT_DICOM_AE: XNAT
+      GATEWAY_PROJECT_MAP: '{"${DEFAULT_PROJECT:-SCOUT_DEMO}": "${DEFAULT_PROJECT:-SCOUT_DEMO}"}'
+      GATEWAY_RETRY_SECONDS: "15"
+      XNAT_ARCHIVER_USER: scout_archiver
+      XNAT_ARCHIVER_PASSWORD: ${XNAT_ARCHIVER_PASSWORD}
+      DEID_HMAC_SALT: ${DEID_HMAC_SALT}
+      DEID_VAULT_KEY: ${DEID_VAULT_KEY}
+      DEID_DATABASE_URL: postgresql://deid_svc:${DEID_DB_PASSWORD}@scout-db:5432/scoutoss
+    volumes:
+      - gateway-spool:/spool
+    labels: { scoutoss.service: deid-gateway }
+    depends_on:
+      scout-db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8001/health',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  indexer:
+    <<: *hardening
+    build: { context: ., dockerfile: services/indexer/Dockerfile }
+    image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      <<: *python-env
+      PORT: "8000"
+      AUTH_AUDIENCE: scoutoss-indexer
+      DATABASE_URL: postgresql://scout_app:${SCOUT_APP_DB_PASSWORD}@scout-db:5432/scoutoss
+      DEID_DATABASE_URL: postgresql://deid_svc:${DEID_DB_PASSWORD}@scout-db:5432/scoutoss
+      DEID_HMAC_SALT: ${DEID_HMAC_SALT}
+      DEID_VAULT_KEY: ${DEID_VAULT_KEY}
+      INDEXER_SOURCE: xnat
+      INDEXER_POLL_SECONDS: "5"
+      XNAT_USER: scout_indexer
+      XNAT_PASSWORD: ${XNAT_INDEXER_PASSWORD}
+      INDEXER_WEBHOOK_TOKEN: ${INDEXER_WEBHOOK_TOKEN}
+    labels: { scoutoss.service: indexer }
+    depends_on:
+      scout-db: { condition: service_healthy }
+      opensearch: { condition: service_healthy }
+
+  # ------------------------------------------------------------------ one-shot bootstrap jobs
+  opensearch-setup:
+    image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}
+    restart: "no"
+    command: ["python", "/bootstrap/scripts/bootstrap/opensearch.py"]
+    environment:
+      BOOTSTRAP_ROOT: /bootstrap
+      OPENSEARCH_URL: http://opensearch:9200
+      DASHBOARDS_URL: http://opensearch-dashboards:5601/dashboards
+    volumes:
+      - ./scripts:/bootstrap/scripts:ro
+      - ./dashboards:/bootstrap/dashboards:ro
+    depends_on:
+      indexer: { condition: service_healthy }
+      opensearch-dashboards: { condition: service_healthy }
+
+  xnat-setup:
+    image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}
+    restart: "no"
+    command: ["python", "/bootstrap/scripts/bootstrap/xnat.py"]
+    environment:
+      BOOTSTRAP_ROOT: /bootstrap
+      XNAT_URL: http://xnat-web:8080
+      XNAT_PUBLIC_URL: https://xnat.localhost:${HTTPS_PORT:-24443}
+      DEFAULT_PROJECT: ${DEFAULT_PROJECT:-SCOUT_DEMO}
+      XNAT_ADMIN_PASSWORD: ${XNAT_ADMIN_PASSWORD}
+      XNAT_INDEXER_PASSWORD: ${XNAT_INDEXER_PASSWORD}
+      XNAT_PIPELINE_PASSWORD: ${XNAT_PIPELINE_PASSWORD}
+      XNAT_ARCHIVER_PASSWORD: ${XNAT_ARCHIVER_PASSWORD}
+      JOB_ENGINE_URL: tcp://job-engine:2375
+    volumes:
+      - ./scripts:/bootstrap/scripts:ro
+      - ./xnat:/bootstrap/xnat:ro
+    depends_on:
+      xnat-web: { condition: service_healthy }
+      pipeline-images: { condition: service_completed_successfully }
+
+  # Builds pipeline images inside the isolated job engine so XNAT can launch them.
+  pipeline-images:
+    image: docker:29.0.4-cli
+    restart: "no"
+    environment:
+      DOCKER_HOST: tcp://job-engine:2375
+    command: ["sh", "-c", "docker build -q -t scoutoss/qc:0.1.0 /pipelines/qc && docker image ls scoutoss/qc"]
+    volumes:
+      - ./services/pipelines:/pipelines:ro
+    depends_on:
+      job-engine: { condition: service_healthy }
+
+volumes:
+  scout-db:
+  xnat-db:
+  xnat-home:
+  xnat-archive:
+  xnat-prearchive:
+  xnat-build:
+  xnat-cache:
+  job-engine:
+  opensearch:
+  gateway-spool:

@@ -1,0 +1,71 @@
+"""CLI: ``serve`` (API + worker), ``index-folder`` (one-shot bulk load), ``gateway``."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+from scoutoss_common.logging import configure_logging
+from scoutoss_indexer import SERVICE_NAME
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="scoutoss-indexer")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    serve = sub.add_parser("serve", help="run the HTTP API and polling worker")
+    serve.add_argument("--host", default="0.0.0.0")  # noqa: S104 - container listener
+    serve.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
+    folder = sub.add_parser("index-folder", help="index every DICOM file under a folder once")
+    folder.add_argument("path", type=Path)
+    folder.add_argument("--project", default=os.getenv("DEFAULT_PROJECT", "FOLDER"))
+    sub.add_parser("gateway", help="run the DICOM de-identification gateway")
+    args = parser.parse_args(argv)
+
+    if args.cmd == "gateway":
+        from scoutoss_indexer.gateway import main as gateway_main
+
+        return gateway_main()
+
+    configure_logging(SERVICE_NAME)
+
+    if args.cmd == "serve":  # pragma: no cover - process entry point
+        import uvicorn
+
+        from scoutoss_common.tracing import setup_tracing
+        from scoutoss_indexer.app import create_app
+
+        app = create_app()
+        setup_tracing(SERVICE_NAME, app)
+        uvicorn.run(app, host=args.host, port=args.port, log_config=None, access_log=False)
+        return 0
+
+    from scoutoss_indexer.bootstrap import build_store, build_vault
+    from scoutoss_indexer.pipeline import Pipeline
+    from scoutoss_indexer.settings import get_settings
+    from scoutoss_indexer.sources.folder import FolderSource
+
+    settings = get_settings()
+    store = build_store(settings)
+    store.ensure_indices()
+    pipeline = Pipeline(
+        store, salt=settings.salt_bytes(), vault=build_vault(settings), default_project=args.project
+    )
+    result = pipeline.process(FolderSource(args.path, project=args.project).pending())
+    print(
+        json.dumps(
+            {
+                "indexed_series": result.indexed,
+                "studies": len(result.studies),
+                "patients": len(result.patients),
+                "dead_lettered": result.dead_lettered,
+            }
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

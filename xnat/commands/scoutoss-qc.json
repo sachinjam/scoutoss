@@ -1,0 +1,50 @@
+{
+  "name": "scoutoss-qc",
+  "label": "ScoutOSS QC",
+  "description": "Per-scan image QC statistics, stored as an xnat:qcAssessmentData assessor.",
+  "version": "0.1.0",
+  "schema-version": "1.0",
+  "info-url": "https://github.com/scoutoss/scoutoss/tree/main/services/pipelines/qc",
+  "image": "scoutoss/qc:0.1.0",
+  "type": "docker",
+  "command-line": "python /app/qc.py /input /output #SESSION_ID# #SESSION_LABEL# #PROJECT#",
+  "override-entrypoint": true,
+  "mounts": [
+    {"name": "in", "writable": false, "path": "/input"},
+    {"name": "out", "writable": true, "path": "/output"}
+  ],
+  "environment-variables": {},
+  "ports": {},
+  "inputs": [
+    {"name": "SESSION_ID", "type": "string", "required": true, "replacement-key": "#SESSION_ID#"},
+    {"name": "SESSION_LABEL", "type": "string", "required": true, "replacement-key": "#SESSION_LABEL#"},
+    {"name": "PROJECT", "type": "string", "required": true, "replacement-key": "#PROJECT#"}
+  ],
+  "outputs": [
+    {"name": "qc-assessor", "description": "QC assessor XML", "required": true, "mount": "out", "path": "qc.xml"}
+  ],
+  "xnat": [
+    {
+      "name": "scoutoss-qc-session",
+      "label": "ScoutOSS QC",
+      "description": "Run ScoutOSS QC on an imaging session",
+      "contexts": ["xnat:imageSessionData"],
+      "external-inputs": [
+        {"name": "session", "type": "Session", "required": true, "load-children": true,
+         "provides-files-for-command-mount": "in"}
+      ],
+      "derived-inputs": [
+        {"name": "session-id", "type": "string", "required": true, "derived-from-wrapper-input": "session",
+         "derived-from-xnat-object-property": "id", "provides-value-for-command-input": "SESSION_ID"},
+        {"name": "session-label", "type": "string", "required": true, "derived-from-wrapper-input": "session",
+         "derived-from-xnat-object-property": "label", "provides-value-for-command-input": "SESSION_LABEL"},
+        {"name": "project", "type": "string", "required": true, "derived-from-wrapper-input": "session",
+         "derived-from-xnat-object-property": "project-id", "provides-value-for-command-input": "PROJECT"}
+      ],
+      "output-handlers": [
+        {"name": "qc-assessor-handler", "accepts-command-output": "qc-assessor",
+         "as-a-child-of": "session", "type": "Assessor", "label": "ScoutOSS QC"}
+      ]
+    }
+  ]
+}

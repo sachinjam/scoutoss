@@ -1,0 +1,297 @@
+{
+  "realm": "scoutoss",
+  "enabled": true,
+  "displayName": "ScoutOSS",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "permanentLockout": false,
+  "passwordPolicy": "length(12) and notUsername",
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "eventsEnabled": true,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+  "eventsListeners": [
+    "jboss-logging"
+  ],
+  "enabledEventTypes": [
+    "LOGIN",
+    "LOGIN_ERROR",
+    "LOGOUT",
+    "CODE_TO_TOKEN",
+    "CLIENT_LOGIN",
+    "CLIENT_LOGIN_ERROR"
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "ScoutOSS administrator (reindex, all data, pipeline config)"
+      },
+      {
+        "name": "researcher",
+        "description": "Query, save cohorts, export, launch pipelines"
+      },
+      {
+        "name": "viewer",
+        "description": "Read-only dashboards and copilot answers"
+      },
+      {
+        "name": "service",
+        "description": "Service-to-service calls (copilot->indexer, mirth->indexer)"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "scoutoss-ui",
+      "name": "ScoutOSS web UI",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "https://app.localhost:${HTTPS_PORT}/*",
+        "https://localhost:${HTTPS_PORT}/*"
+      ],
+      "webOrigins": [
+        "https://app.localhost:${HTTPS_PORT}",
+        "https://localhost:${HTTPS_PORT}"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://app.localhost:${HTTPS_PORT}/*##https://localhost:${HTTPS_PORT}/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-scoutoss-copilot",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "scoutoss-copilot",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "scoutoss-copilot",
+      "name": "Copilot API",
+      "publicClient": false,
+      "secret": "${KC_COPILOT_CLIENT_SECRET}",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "audience-scoutoss-indexer",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "scoutoss-indexer",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "scoutoss-indexer",
+      "name": "Indexer API",
+      "publicClient": false,
+      "bearerOnly": false,
+      "secret": "${KC_INDEXER_CLIENT_SECRET}",
+      "serviceAccountsEnabled": false,
+      "standardFlowEnabled": false
+    },
+    {
+      "clientId": "scoutoss-mirth",
+      "name": "Mirth HL7 channel",
+      "publicClient": false,
+      "secret": "${KC_MIRTH_CLIENT_SECRET}",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "audience-scoutoss-indexer",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "scoutoss-indexer",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "scoutoss-dashboards",
+      "name": "OpenSearch Dashboards / tools (oauth2-proxy)",
+      "publicClient": false,
+      "secret": "${KC_DASHBOARDS_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "https://app.localhost:${HTTPS_PORT}/oauth2/callback"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "protocolMappers": [
+        {
+          "name": "audience-scoutoss-dashboards",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "scoutoss-dashboards",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "scoutoss-notebooks",
+      "name": "JupyterHub",
+      "publicClient": false,
+      "secret": "${KC_NOTEBOOKS_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "https://app.localhost:${HTTPS_PORT}/notebooks/hub/oauth_callback"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "protocolMappers": [
+        {
+          "name": "audience-scoutoss-copilot",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "scoutoss-copilot",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "scoutoss-cli",
+      "name": "Scripts / e2e (password grant, dev only)",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "audience-scoutoss-copilot",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "scoutoss-copilot",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience-scoutoss-indexer",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "scoutoss-indexer",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "researcher",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Researcher",
+      "lastName": "Demo",
+      "email": "researcher@scoutoss.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${DEMO_USER_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "researcher"
+      ]
+    },
+    {
+      "username": "viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Viewer",
+      "lastName": "Demo",
+      "email": "viewer@scoutoss.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${DEMO_USER_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "viewer"
+      ]
+    },
+    {
+      "username": "scoutadmin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Scoutadmin",
+      "lastName": "Demo",
+      "email": "scoutadmin@scoutoss.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${DEMO_USER_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin",
+        "researcher"
+      ]
+    },
+    {
+      "username": "service-account-scoutoss-copilot",
+      "enabled": true,
+      "serviceAccountClientId": "scoutoss-copilot",
+      "realmRoles": [
+        "service"
+      ]
+    },
+    {
+      "username": "service-account-scoutoss-mirth",
+      "enabled": true,
+      "serviceAccountClientId": "scoutoss-mirth",
+      "realmRoles": [
+        "service"
+      ]
+    }
+  ],
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self' https://*.localhost:${HTTPS_PORT}; object-src 'none';",
+    "xFrameOptions": "SAMEORIGIN",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains"
+  }
+}

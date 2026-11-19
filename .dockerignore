@@ -1,0 +1,16 @@
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/node_modules
+**/dist
+.git
+.env
+infra/nginx/certs
+xnat/plugins/*.jar
+data
+.coverage
+coverage.xml
+htmlcov

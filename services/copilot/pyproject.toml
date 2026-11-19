@@ -1,0 +1,20 @@
+[project]
+name = "scoutoss-copilot"
+version = "0.1.0"
+description = "ScoutOSS copilot: natural language -> validated OpenSearch query plans, charts and cohorts"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "scoutoss-common",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+]
+
+[project.scripts]
+scoutoss-copilot = "scoutoss_copilot.__main__:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scoutoss_copilot"]
