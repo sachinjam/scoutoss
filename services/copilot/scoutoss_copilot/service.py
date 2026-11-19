@@ -109,7 +109,14 @@ class Copilot:
             raw = self.llm.complete(messages)
         return validate_plan(raw, max_rows=self.max_rows), messages
 
-    def ask(self, question: str, *, user: str, session_id: str) -> Answer:
+    def ask(
+        self,
+        question: str,
+        *,
+        user: str,
+        session_id: str,
+        projects: frozenset[str] | None = None,
+    ) -> Answer:
         clean_question = redact_text(question)
         warnings: list[str] = []
         if clean_question != question:
@@ -130,7 +137,7 @@ class Copilot:
             else:
                 base = set(prior.members)
         with tracer.start_as_current_span("copilot.execute", attributes={"steps": len(plan.steps)}):
-            result = self.executor.execute(plan, base_cohort=base)
+            result = self.executor.execute(plan, base_cohort=base, projects=projects)
         charts = choose_charts(plan.charts, result.stats)
         generated = plan.model_dump(exclude_none=True)
         cohort = self.cohorts.create(

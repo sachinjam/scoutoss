@@ -31,10 +31,20 @@ class Principal:
     roles: frozenset[str] = field(default_factory=frozenset)
     client_id: str | None = None
     token: str = field(default="", repr=False)
+    projects: frozenset[str] = field(default_factory=frozenset)
 
     @property
     def pseudonym(self) -> str:
         return "u_" + hashlib.sha256(self.subject.encode()).hexdigest()[:16]
+
+    @property
+    def all_projects(self) -> bool:
+        """Admins and service accounts are not project-scoped."""
+        return bool(self.roles.intersection({"admin", "service"}))
+
+    def project_scope(self) -> frozenset[str] | None:
+        """Projects this caller may read (None = unrestricted)."""
+        return None if self.all_projects else self.projects
 
     def has_any(self, roles: Iterable[str]) -> bool:
         return bool(self.roles.intersection(roles))
@@ -115,7 +125,21 @@ class JWTValidator:
             roles=frozenset(roles_from_claims(claims, self.client_id)),
             client_id=claims.get("azp"),
             token=token,
+            projects=frozenset(projects_from_claims(claims)),
         )
+
+
+PROJECT_GROUP_PREFIX = "/projects/"
+
+
+def projects_from_claims(claims: dict[str, Any]) -> set[str]:
+    """XNAT project access, mirrored as Keycloak groups ``/projects/<PROJECT_ID>``
+    (or an explicit ``projects`` claim). This is the multi-tenancy boundary."""
+    projects = {str(p) for p in claims.get("projects", []) if p}
+    for group in claims.get("groups", []):
+        if isinstance(group, str) and group.startswith(PROJECT_GROUP_PREFIX):
+            projects.add(group[len(PROJECT_GROUP_PREFIX) :].split("/")[0])
+    return projects
 
 
 def roles_from_claims(claims: dict[str, Any], client_id: str | None = None) -> set[str]:

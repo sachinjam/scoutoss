@@ -66,6 +66,7 @@ def make_token(rsa_keys: dict[str, Any]) -> Callable[..., str]:
         kid: str = "test-key",
         sub: str = "user-123",
         username: str = "rita.researcher",
+        groups: tuple[str, ...] = ("/projects/SCOUT_DEMO",),
     ) -> str:
         now = int(time.time())
         claims = {
@@ -77,6 +78,7 @@ def make_token(rsa_keys: dict[str, Any]) -> Callable[..., str]:
             "exp": now + expires_in,
             "azp": "scoutoss-ui",
             "realm_access": {"roles": list(roles)},
+            "groups": list(groups),
         }
         return jwt.encode(
             claims, key or rsa_keys["private"], algorithm="RS256", headers={"kid": kid}

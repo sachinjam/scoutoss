@@ -60,12 +60,18 @@ def populated_os() -> FakeOpenSearch:
                 "diagnosis_category": cat,
                 "diagnosis_code": code,
                 "event_type": "diagnosis",
+                "project": "SCOUT_DEMO",
             },
             id=f"ev{i}",
         )
     os_.index(
         "dicom_patients",
-        {"patient_pseudonym": "SPA", "patient_sex": "M", "age_latest": 70.3},
+        {
+            "patient_pseudonym": "SPA",
+            "patient_sex": "M",
+            "age_latest": 70.3,
+            "projects": ["SCOUT_DEMO"],
+        },
         id="SPA",
     )
     return os_

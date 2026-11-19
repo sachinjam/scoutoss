@@ -282,7 +282,9 @@ def build_patient_doc(
         "series_count": sum(int(s.get("series_count") or 0) for s in studies),
         "modalities": _uniq(m for s in studies for m in s.get("modalities") or []),
         "body_parts": _uniq(b for s in studies for b in s.get("body_parts") or []),
-        "projects": _uniq(s.get("project") for s in studies),
+        "projects": _uniq(
+            [s.get("project") for s in studies] + [c.get("project") for c in clinical]
+        ),
         "first_study_date": dates[0] if dates else None,
         "last_study_date": dates[-1] if dates else None,
         "diagnoses": sorted(

@@ -255,6 +255,7 @@ class ClinicalIngestor:
         shifted = (when + timedelta(days=offset)).isoformat() if when else None
         base = {
             "patient_pseudonym": pseudonym,
+            "project": project,
             "message_type": event.message_type,
             "event_date": shifted,
             "patient_sex": sex,

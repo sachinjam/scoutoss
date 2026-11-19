@@ -14,7 +14,7 @@ from typing import Any, Protocol
 import structlog
 from opentelemetry import trace
 
-from scoutoss_common.catalog import CLINICAL_INDEX, PATIENTS_INDEX, STUDIES_INDEX
+from scoutoss_common.catalog import CLINICAL_INDEX, PATIENTS_INDEX, PROJECT_FIELD, STUDIES_INDEX
 from scoutoss_copilot.plan import MAX_ROWS, QueryPlan
 
 log = structlog.get_logger(__name__)
@@ -90,9 +90,24 @@ class Executor:
             raise ExecutionError(f"search on {index} exceeded {self.timeout}s")
         return resp
 
-    def run_step(self, step_index: int, plan: QueryPlan, restrict: set[str] | None) -> StepResult:
+    @staticmethod
+    def scoped(
+        index: str, query: dict[str, Any], projects: frozenset[str] | None
+    ) -> dict[str, Any]:
+        """Wrap ``query`` with the caller's project (tenant) filter. ``None`` = unrestricted."""
+        if projects is None:
+            return query
+        return {"bool": {"filter": [query, {"terms": {PROJECT_FIELD[index]: sorted(projects)}}]}}
+
+    def run_step(
+        self,
+        step_index: int,
+        plan: QueryPlan,
+        restrict: set[str] | None,
+        projects: frozenset[str] | None = None,
+    ) -> StepResult:
         step = plan.steps[step_index]
-        query = step.query
+        query = self.scoped(step.index, step.query, projects)
         if restrict is not None:
             query = {
                 "bool": {
@@ -128,8 +143,14 @@ class Executor:
             aggregations=resp.get("aggregations"),
         )
 
-    def execute(self, plan: QueryPlan, *, base_cohort: set[str] | None = None) -> CohortResult:
-        steps = [self.run_step(i, plan, base_cohort) for i in range(len(plan.steps))]
+    def execute(
+        self,
+        plan: QueryPlan,
+        *,
+        base_cohort: set[str] | None = None,
+        projects: frozenset[str] | None = None,
+    ) -> CohortResult:
+        steps = [self.run_step(i, plan, base_cohort, projects) for i in range(len(plan.steps))]
         sets = [s.pseudonyms for s in steps]
         members = set.intersection(*sets) if plan.combine == "intersect" else set.union(*sets)
         if base_cohort is not None:
@@ -140,11 +161,18 @@ class Executor:
             pseudonyms=sorted(members), study_uids=[], steps=steps, truncated=truncated
         )
         self._cohort_stats(
-            result, restrict_studies={u for s in study_steps for u in s.study_uids} or None
+            result,
+            restrict_studies={u for s in study_steps for u in s.study_uids} or None,
+            projects=projects,
         )
         return result
 
-    def _cohort_stats(self, result: CohortResult, restrict_studies: set[str] | None) -> None:
+    def _cohort_stats(
+        self,
+        result: CohortResult,
+        restrict_studies: set[str] | None,
+        projects: frozenset[str] | None = None,
+    ) -> None:
         if not result.pseudonyms:
             result.stats = empty_stats()
             return
@@ -153,6 +181,8 @@ class Executor:
         ]
         if restrict_studies is not None:
             filters.append({"terms": {"study_uid": sorted(restrict_studies)[: self.max_rows]}})
+        if projects is not None:
+            filters.append({"terms": {"project": sorted(projects)}})
         body = {
             "query": {"bool": {"filter": filters}},
             "size": 50,
@@ -197,16 +227,22 @@ class Executor:
             "year": dict(sorted(_buckets(aggs.get("year")).items())),
             "manufacturer": _buckets(aggs.get("manufacturer")),
             "age_mean": (aggs.get("age_stats") or {}).get("avg"),
-            "diagnosis": self._diagnoses(result.pseudonyms),
+            "diagnosis": self._diagnoses(result.pseudonyms, projects),
         }
 
-    def _diagnoses(self, pseudonyms: list[str]) -> dict[str, int]:
+    def _diagnoses(
+        self, pseudonyms: list[str], projects: frozenset[str] | None = None
+    ) -> dict[str, int]:
         try:
             resp = self._search(
                 CLINICAL_INDEX,
                 {
                     "size": 0,
-                    "query": {"terms": {"patient_pseudonym": pseudonyms[: self.max_rows]}},
+                    "query": self.scoped(
+                        CLINICAL_INDEX,
+                        {"terms": {"patient_pseudonym": pseudonyms[: self.max_rows]}},
+                        projects,
+                    ),
                     "aggs": {
                         "dx": {
                             "terms": {"field": "diagnosis_category", "size": 20},

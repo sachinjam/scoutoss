@@ -89,6 +89,20 @@ def test_jwks_url_client(
         v.validate(make_token(kid="nope"))
 
 
+def test_projects_from_claims_and_scope(
+    validator: JWTValidator, make_token: Callable[..., str]
+) -> None:
+    from scoutoss_common.auth import projects_from_claims
+
+    assert projects_from_claims(
+        {"groups": ["/projects/A", "/projects/B/sub", "/other"], "projects": ["C"]}
+    ) == {"A", "B", "C"}
+    p = validator.principal(make_token(groups=("/projects/SCOUT_DEMO",)))
+    assert p.projects == {"SCOUT_DEMO"} and p.project_scope() == {"SCOUT_DEMO"}
+    admin = validator.principal(make_token(roles=("admin",), groups=()))
+    assert admin.all_projects and admin.project_scope() is None
+
+
 def test_roles_from_claims() -> None:
     claims = {
         "realm_access": {"roles": ["viewer"]},

@@ -77,6 +77,19 @@
             "access.token.claim": "true",
             "introspection.token.claim": "true"
           }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
         }
       ]
     },
@@ -155,6 +168,19 @@
             "access.token.claim": "true",
             "introspection.token.claim": "true"
           }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
         }
       ]
     },
@@ -179,6 +205,19 @@
             "included.client.audience": "scoutoss-copilot",
             "id.token.claim": "false",
             "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
             "introspection.token.claim": "true"
           }
         }
@@ -212,6 +251,19 @@
             "access.token.claim": "true",
             "introspection.token.claim": "true"
           }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
         }
       ]
     }
@@ -233,6 +285,9 @@
       ],
       "realmRoles": [
         "researcher"
+      ],
+      "groups": [
+        "/projects/SCOUT_DEMO"
       ]
     },
     {
@@ -251,6 +306,9 @@
       ],
       "realmRoles": [
         "viewer"
+      ],
+      "groups": [
+        "/projects/SCOUT_DEMO"
       ]
     },
     {
@@ -293,5 +351,22 @@
     "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self' https://*.localhost:${HTTPS_PORT}; object-src 'none';",
     "xFrameOptions": "SAMEORIGIN",
     "strictTransportSecurity": "max-age=31536000; includeSubDomains"
-  }
+  },
+  "groups": [
+    {
+      "name": "projects",
+      "path": "/projects",
+      "subGroups": [
+        {
+          "name": "SCOUT_DEMO",
+          "path": "/projects/SCOUT_DEMO",
+          "attributes": {
+            "xnat_project": [
+              "SCOUT_DEMO"
+            ]
+          }
+        }
+      ]
+    }
+  ]
 }

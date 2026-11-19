@@ -25,4 +25,6 @@ echo "pushed $(find "$work/study" -name '*.dcm' | wc -l | tr -d ' ') instances"
 
 echo "== checks"
 $PY scripts/e2e.py --mrn "$mrn" --start "$start" "$@"
+echo "== SSO (Keycloak -> oauth2-proxy -> OpenSearch Dashboards)"
+$PY scripts/check_sso.py
 echo "E2E PASSED"

@@ -324,3 +324,29 @@ def test_input_validation(client: TestClient, make_token: Callable[..., str]) ->
         ).status_code
         == 422
     )
+
+
+def test_project_tenancy(
+    deps: CopilotDeps, make_token: Callable[..., str], populated_os: FakeOpenSearch
+) -> None:
+    populated_os.data["dicom_studies"]["1.1"]["project"] = (
+        "OTHER"  # one of SPA's two CT chest studies
+    )
+    with TestClient(create_app(deps)) as c:
+        mine = c.post("/query", json={"question": "CT chest"}, headers=H(make_token)).json()
+        assert mine["study_count"] == 2  # 1.2 (SPA) + 3.1 (SPC); 1.1 belongs to OTHER
+        executed = json.dumps(mine["executed_queries"])
+        assert '"project": ["SCOUT_DEMO"]' in executed
+        other = {"Authorization": f"Bearer {make_token(groups=('/projects/OTHER',), sub='o')}"}
+        theirs = c.post("/query", json={"question": "CT chest"}, headers=other).json()
+        assert theirs["study_count"] == 1 and theirs["cohort_count"] == 1
+        admin = {"Authorization": f"Bearer {make_token(roles=('admin',), groups=(), sub='a')}"}
+        assert (
+            c.post("/query", json={"question": "CT chest"}, headers=admin).json()["study_count"]
+            == 3
+        )
+        nobody = {"Authorization": f"Bearer {make_token(groups=(), sub='n')}"}
+        assert c.post("/query", json={"question": "CT chest"}, headers=nobody).status_code == 403
+        # an exported cohort is re-filtered by the caller's projects
+        export = c.get(f"/cohorts/{theirs['cohort_id']}/export", headers=other)
+        assert all("SCOUT_DEMO" not in row for row in export.text.splitlines()[1:])

@@ -133,6 +133,7 @@ CLINICAL_MAPPING: dict[str, Any] = {
         "properties": {
             "event_id": {"type": "keyword"},
             "patient_pseudonym": {"type": "keyword"},
+            "project": {"type": "keyword"},
             "message_type": {"type": "keyword"},
             "event_type": {"type": "keyword"},
             "event_date": {"type": "date", "format": "strict_date"},
@@ -216,6 +217,7 @@ FIELD_DESCRIPTIONS: dict[str, dict[str, str]] = {
     },
     CLINICAL_INDEX: {
         "patient_pseudonym": "patient pseudonym (joins to imaging)",
+        "project": "project the HL7 feed belongs to",
         "message_type": "HL7 message type, e.g. ADT^A01, ORU^R01",
         "event_type": "admission, update, order, result, diagnosis",
         "event_date": "shifted event date",
@@ -238,6 +240,15 @@ FIELD_DESCRIPTIONS: dict[str, dict[str, str]] = {
 EXAMPLE_VALUE_FIELDS: dict[str, tuple[str, ...]] = {
     STUDIES_INDEX: ("modalities", "body_parts", "patient_sex", "manufacturers", "project"),
     CLINICAL_INDEX: ("diagnosis_category", "event_type", "message_type", "lab_code"),
+}
+
+
+# Field carrying the project (tenant) per queryable index.
+PROJECT_FIELD: dict[str, str] = {
+    STUDIES_INDEX: "project",
+    SERIES_INDEX: "project",
+    PATIENTS_INDEX: "projects",
+    CLINICAL_INDEX: "project",
 }
 
 

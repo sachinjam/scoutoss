@@ -109,8 +109,13 @@ def create_app(deps: CopilotDeps | None = None, *, build: bool = True) -> FastAP
     def answer(
         d: CopilotDeps, p: Principal, body: QueryRequest, request: Request
     ) -> dict[str, Any]:
+        scope = p.project_scope()
+        if scope is not None and not scope:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "no project access")
         try:
-            result = d.copilot.ask(body.question, user=p.pseudonym, session_id=body.session_id)
+            result = d.copilot.ask(
+                body.question, user=p.pseudonym, session_id=body.session_id, projects=scope
+            )
         except PlanValidationError as exc:
             audit(d, p, "query", "plan", {"q": body.question}, request, outcome="rejected")
             raise HTTPException(
@@ -260,7 +265,7 @@ def create_app(deps: CopilotDeps | None = None, *, build: bool = True) -> FastAP
         if cohort is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "cohort not found")
         audit(d, p, "export", cohort_id, {"format": "csv", "n": cohort.member_count}, request)
-        studies = _cohort_studies(d, cohort.members, cohort.study_uids)
+        studies = _cohort_studies(d, cohort.members, cohort.study_uids, p)
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(
@@ -324,7 +329,7 @@ def create_app(deps: CopilotDeps | None = None, *, build: bool = True) -> FastAP
             raise HTTPException(status.HTTP_404_NOT_FOUND, "cohort not found")
         studies = [
             s
-            for s in _cohort_studies(d, cohort.members, cohort.study_uids)
+            for s in _cohort_studies(d, cohort.members, cohort.study_uids, p)
             if s.get("xnat_experiment_id") and s.get("project")
         ]
         if len(studies) > d.max_pipeline_sessions:
@@ -379,11 +384,14 @@ def create_app(deps: CopilotDeps | None = None, *, build: bool = True) -> FastAP
 
 
 def _cohort_studies(
-    d: CopilotDeps, members: list[str], study_uids: list[str]
+    d: CopilotDeps, members: list[str], study_uids: list[str], principal: Principal
 ) -> list[dict[str, Any]]:
     filters: list[dict[str, Any]] = [{"terms": {"patient_pseudonym": members[:10_000]}}]
     if study_uids:
         filters.append({"terms": {"study_uid": study_uids[:10_000]}})
+    scope = principal.project_scope()
+    if scope is not None:  # tenancy is re-checked at export/launch time, not only at query time
+        filters.append({"terms": {"project": sorted(scope)}})
     if not members:
         return []
     resp = d.search.search(
