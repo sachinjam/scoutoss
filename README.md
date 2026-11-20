@@ -1,0 +1,65 @@
+# ScoutOSS
+
+Open-source, AI-assisted clinical research data exploration built on **XNAT**. DICOM and
+HL7 data are de-identified on the way in and land in a unified, searchable data lake. You
+explore it through OpenSearch dashboards, a natural-language copilot with a *Review Code*
+panel, notebooks (pyxnat), the OHIF zero-footprint viewer, and containerized AI pipelines
+run by the XNAT Container Service.
+
+```
+modality ─C-STORE─▶ de-id gateway ─▶ XNAT ─▶ indexer ─▶ OpenSearch ◀─ copilot ◀─ UI
+EHR ─HL7─▶ Mirth ───────────────────────────▶ indexer ─▶ clinical_events ┘
+```
+
+## Quick start
+
+```bash
+make up      # generates .env + dev TLS certs, fetches XNAT plugins, boots and bootstraps everything
+make seed    # 10 synthetic fake-PHI studies (7 patients) + 13 HL7 messages
+make e2e     # C-STORE → XNAT → searchable < 60 s → copilot → pipeline → assessor → audit → SSO
+```
+
+Open https://app.localhost:24443 and sign in as `researcher`; the password is
+`DEMO_USER_PASSWORD` in `.env`. Then ask:
+
+* *how many CT studies*
+* *patients under 85 with lung cancer AND CT chest*
+* *of those, how many are female?*
+
+Every answer shows the generated query plan, Vega-Lite charts and OHIF links. From there you
+can **Save Cohort**, **Export CSV** or **Run Pipeline on Cohort**.
+
+The OHIF plugin jar is not publicly downloadable from every network. Put it in
+`$XNAT_PLUGIN_CACHE`, or set `OHIF_PLUGIN_URL` in `.env`.
+
+## Development
+
+```bash
+uv sync                      # Python 3.12 workspace (services/common, indexer, copilot)
+make lint                    # ruff + mypy --strict
+make test                    # unit + integration (testcontainers), coverage gate 80%
+make ui-test                 # UI typecheck, eslint, vitest
+make helm-lint
+```
+
+| Service | Path | Stack |
+|---|---|---|
+| shared library | `services/common` | structlog, Prometheus, OpenTelemetry, PyJWT, audit, PHI redaction |
+| indexer + de-id gateway + HL7 ingest | `services/indexer` | FastAPI, pydicom, pynetdicom, psycopg, opensearch-py |
+| copilot | `services/copilot` | FastAPI, LLM providers (heuristic / Azure OpenAI / vLLM) |
+| UI | `services/ui` | React 18, Vite, TypeScript, keycloak-js, vega-embed |
+| HL7 gateway | `services/hl7-gateway` | Mirth Connect 4.5.2 channel |
+| notebooks | `services/notebooks` | JupyterHub + pyxnat |
+
+## Documentation
+
+* [Architecture](docs/architecture.md): diagrams, data flows, security model
+* [Runbook](docs/runbook.md): operations, re-indexing, alerting, backup and restore, DR
+* [API](docs/api.md): copilot and indexer endpoints, schemas, metrics
+* [Compliance](docs/compliance.md): PHI data flow, de-identification spec, audit model, HIPAA/GDPR mapping
+
+## License
+
+Apache-2.0. Third-party components keep their own licenses: XNAT (BSD-2), Mirth Connect 4.5.2
+(MPL-2.0), OpenSearch (Apache-2.0), Keycloak (Apache-2.0), OHIF (MIT). All bundled demo data is
+synthetic.

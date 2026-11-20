@@ -1,0 +1,55 @@
+{{- if .Values.mirth.enabled }}
+{{- $name := "mirth" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  serviceName: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  replicas: 1
+  selector:
+    matchLabels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 8 }}
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: mirth
+          image: {{ .Values.mirth.image }}
+          ports:
+            - { name: mllp, containerPort: 6661 }
+            - { name: api, containerPort: 8443 }
+          env:
+            - { name: DATABASE, value: postgres }
+            - { name: DATABASE_URL, value: "jdbc:postgresql://{{ .Values.external.postgres.host }}:{{ .Values.external.postgres.port }}/{{ .Values.mirth.database }}?sslmode={{ .Values.external.postgres.sslmode }}" }
+            - { name: DATABASE_USERNAME, value: mirth }
+            - name: DATABASE_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: MIRTH_DB_PASSWORD } }
+            - { name: KC_TOKEN_URL, value: "{{ .Values.external.keycloak.internalUrl }}/protocol/openid-connect/token" }
+            - { name: KC_MIRTH_CLIENT_ID, value: scoutoss-mirth }
+            - name: KC_MIRTH_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: KC_MIRTH_CLIENT_SECRET } }
+            - { name: INDEXER_URL, value: "http://{{ include "scoutoss.fullname" . }}-indexer:8000" }
+            - { name: SCOUT_PROJECT, value: {{ .Values.global.defaultProject | quote }} }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          resources: {{- toYaml .Values.mirth.resources | nindent 12 }}
+          volumeMounts: [{ name: appdata, mountPath: /opt/connect/appdata }]
+          readinessProbe: { tcpSocket: { port: mllp }, periodSeconds: 10 }
+  volumeClaimTemplates:
+    - metadata: { name: appdata }
+      spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 2Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.mirth.service.type }}
+  selector: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 4 }}
+  ports:
+    - { name: mllp, port: 6661, targetPort: mllp }
+{{- end }}

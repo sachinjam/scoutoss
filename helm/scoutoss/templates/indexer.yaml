@@ -1,0 +1,55 @@
+{{- $name := "indexer" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: {{ .Values.indexer.replicas }}
+  strategy: { type: Recreate }   # a single poller at a time
+  selector:
+    matchLabels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 8 }}
+    spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "scoutoss.image" (dict "root" . "name" "indexer") }}
+          args: ["scoutoss-indexer", "serve"]
+          ports: [{ name: http, containerPort: 8000 }]
+          env:
+            {{- include "scoutoss.commonEnv" . | nindent 12 }}
+            - { name: AUTH_AUDIENCE, value: scoutoss-indexer }
+            - { name: INDEXER_SOURCE, value: xnat }
+            - { name: INDEXER_POLL_SECONDS, value: {{ .Values.indexer.pollSeconds | quote }} }
+            - { name: XNAT_USER, value: scout_indexer }
+            {{- range $k := list "SCOUT_APP_DB_PASSWORD" "DEID_DB_PASSWORD" "DEID_HMAC_SALT" "DEID_VAULT_KEY" "INDEXER_WEBHOOK_TOKEN" }}
+            {{- include "scoutoss.secretEnv" (dict "root" $ "key" $k) | nindent 12 }}
+            {{- end }}
+            - name: XNAT_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: XNAT_INDEXER_PASSWORD } }
+            - name: DATABASE_URL
+              value: {{ include "scoutoss.pgUrl" (dict "root" . "user" "scout_app" "passwordVar" "SCOUT_APP_DB_PASSWORD") | quote }}
+            - name: DEID_DATABASE_URL
+              value: {{ include "scoutoss.pgUrl" (dict "root" . "user" "deid_svc" "passwordVar" "DEID_DB_PASSWORD") | quote }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources: {{- toYaml .Values.indexer.resources | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          {{- include "scoutoss.probes" . | nindent 10 }}
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  selector: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 4 }}
+  ports: [{ name: http, port: 8000, targetPort: http }]

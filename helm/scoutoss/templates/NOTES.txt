@@ -1,0 +1,9 @@
+ScoutOSS {{ .Chart.AppVersion }} deployed.
+
+  UI / API:   https://{{ .Values.hosts.app }}/  (copilot at /api/copilot)
+  DICOM:      AE {{ .Values.gateway.aeTitle }} on service {{ include "scoutoss.fullname" . }}-deid-gateway:{{ .Values.gateway.service.port }}
+  HL7 MLLP:   {{ include "scoutoss.fullname" . }}-mirth:6661
+
+Before first use: create the Secret "{{ .Values.existingSecret }}", the Postgres roles from
+infra/postgres/init.sh, the Keycloak realm (infra/keycloak/realm.json) and run the XNAT /
+OpenSearch / Mirth bootstrap jobs (docs/runbook.md#first-install).

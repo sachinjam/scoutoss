@@ -1,0 +1,38 @@
+{{- if .Values.monitoring.serviceMonitor }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "scoutoss.fullname" . }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }} }
+  endpoints:
+    - { port: http, path: /metrics, interval: 30s }
+{{- end }}
+{{- if .Values.monitoring.prometheusRule }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "scoutoss.fullname" . }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: scoutoss
+      rules:
+        - alert: IndexerDeadLetters
+          expr: sum(increase(indexer_dlq_total[15m])) > 0
+          labels: {{- merge (dict "severity" "warning") .Values.monitoring.alertLabels | toYaml | nindent 12 }}
+          annotations: { summary: "Indexer routed items to the DLQ in the last 15 minutes" }
+        - alert: CopilotValidationFailureRateHigh
+          expr: sum(rate(copilot_query_validation_failures_total[10m])) / clamp_min(sum(rate(copilot_queries_total[10m])) + sum(rate(copilot_query_validation_failures_total[10m])), 1e-9) > 0.05
+          for: 5m
+          labels: {{- merge (dict "severity" "warning") .Values.monitoring.alertLabels | toYaml | nindent 12 }}
+          annotations: { summary: "More than 5% of generated queries rejected" }
+        - alert: ServiceDown
+          expr: up{namespace="{{ .Release.Namespace }}"} == 0
+          for: 2m
+          labels: {{- merge (dict "severity" "critical") .Values.monitoring.alertLabels | toYaml | nindent 12 }}
+          annotations: { summary: "{{ "{{" }} $labels.job {{ "}}" }} /health failing for more than 2 minutes" }
+{{- end }}

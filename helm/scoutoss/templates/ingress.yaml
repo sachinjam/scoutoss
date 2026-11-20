@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "scoutoss.fullname" . }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.ingress.annotations }}{{ toYaml . | nindent 4 }}{{- end }}
+    {{- if and .Values.tls.enabled .Values.tls.certManager.enabled }}
+    cert-manager.io/{{ if eq .Values.tls.certManager.issuerKind "ClusterIssuer" }}cluster-issuer{{ else }}issuer{{ end }}: {{ .Values.tls.certManager.issuer }}
+    {{- end }}
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+      more_set_headers "X-Content-Type-Options: nosniff";
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.hosts.app | quote }}]
+      secretName: {{ include "scoutoss.fullname" . }}-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.hosts.app | quote }}
+      http:
+        paths:
+          - path: /api/copilot/
+            pathType: Prefix
+            backend: { service: { name: {{ include "scoutoss.fullname" . }}-copilot, port: { name: http } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: {{ include "scoutoss.fullname" . }}-ui, port: { name: http } } }

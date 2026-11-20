@@ -1,0 +1,135 @@
+# ScoutOSS production values. Stateful platforms (PostgreSQL, OpenSearch with the security
+# plugin, Keycloak, XNAT) are expected to be managed/HA deployments referenced here; the
+# chart runs the ScoutOSS services, the HL7 engine and the edge (Ingress + cert-manager).
+
+global:
+  env: prod
+  imageRegistry: ghcr.io/scoutoss
+  imageTag: "0.1.0"
+  imagePullSecrets: []
+  defaultProject: SCOUT_DEMO
+  logLevel: INFO
+
+# All secrets come from one pre-created Secret (sealed-secrets / external-secrets / Vault).
+# Keys: DEID_HMAC_SALT DEID_VAULT_KEY SCOUT_APP_DB_PASSWORD DEID_DB_PASSWORD
+#       COPILOT_DB_PASSWORD KC_COPILOT_CLIENT_SECRET KC_MIRTH_CLIENT_SECRET
+#       XNAT_INDEXER_PASSWORD XNAT_PIPELINE_PASSWORD XNAT_ARCHIVER_PASSWORD
+#       INDEXER_WEBHOOK_TOKEN MIRTH_DB_PASSWORD OPENSEARCH_PASSWORD
+#       AZURE_OPENAI_API_KEY (optional) LLM_API_KEY (optional)
+existingSecret: scoutoss-secrets
+
+hosts:
+  app: scoutoss.example.org
+  xnat: xnat.example.org
+  auth: auth.example.org
+
+tls:
+  enabled: true
+  certManager:
+    enabled: true
+    issuer: letsencrypt-prod
+    issuerKind: ClusterIssuer
+
+ingress:
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+
+external:
+  postgres:
+    host: scoutoss-postgres-rw.db.svc
+    port: 5432
+    database: scoutoss
+    sslmode: require
+  opensearch:
+    url: https://opensearch.search.svc:9200
+    user: scoutoss_app
+    verifyCerts: true
+  keycloak:
+    issuer: https://auth.example.org/realms/scoutoss
+    internalUrl: http://keycloak.auth.svc:8080/realms/scoutoss
+  xnat:
+    url: http://xnat-web.xnat.svc:8080
+    publicUrl: https://xnat.example.org
+    dicomHost: xnat-web.xnat.svc
+    dicomPort: 8104
+    dicomAe: XNAT
+  otlpEndpoint: http://otel-collector.observability.svc:4318
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+indexer:
+  replicas: 1          # one poller; the cursor table makes failover safe
+  pollSeconds: 10
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+gateway:
+  enabled: true
+  replicas: 1
+  aeTitle: SCOUTGW
+  projectMap: {}
+  service:
+    type: LoadBalancer   # DICOM C-STORE from modalities/PACS; restrict with loadBalancerSourceRanges
+    port: 11112
+    loadBalancerSourceRanges: []
+  spool:
+    size: 50Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+copilot:
+  replicas: 2
+  llm:
+    provider: azure      # azure | openai_compatible | heuristic
+    model: gpt-4o
+    baseUrl: ""
+    azureEndpoint: https://example.openai.azure.com
+    azureDeployment: gpt-4o
+    azureApiVersion: "2024-10-21"
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+ui:
+  replicas: 2
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+mirth:
+  enabled: true
+  image: nextgenhealthcare/connect:4.5.2
+  service:
+    type: ClusterIP      # expose MLLP 6661 to the interface engine via an internal LB if needed
+  database: mirthdb
+  resources:
+    requests: { cpu: 250m, memory: 768Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+monitoring:
+  serviceMonitor: true
+  prometheusRule: true
+  alertLabels: { team: scoutoss }
+
+networkPolicy:
+  enabled: true

@@ -90,5 +90,6 @@ dashboards: ## Regenerate dashboards/scoutoss.ndjson
 	python3 scripts/gen_dashboards.py
 
 .PHONY: helm-lint
-helm-lint: ## Lint and render the Helm chart
-	helm lint helm/scoutoss && helm template scoutoss helm/scoutoss >/dev/null
+helm-lint: ## Lint and render the Helm chart (uses a pinned helm container if helm is absent)
+	@if command -v helm >/dev/null; then helm lint helm/scoutoss && helm template scoutoss helm/scoutoss >/dev/null; \
+	else docker run --rm -v "$(CURDIR)/helm:/helm" alpine/helm:3.18.4 lint /helm/scoutoss; fi

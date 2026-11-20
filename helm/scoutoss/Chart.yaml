@@ -1,0 +1,8 @@
+apiVersion: v2
+name: scoutoss
+description: ScoutOSS — AI-assisted clinical research data exploration on XNAT (production chart)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [xnat, dicom, hl7, opensearch, research, imaging]
+home: https://github.com/scoutoss/scoutoss

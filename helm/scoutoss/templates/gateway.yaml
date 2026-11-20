@@ -1,0 +1,73 @@
+{{- if .Values.gateway.enabled }}
+{{- $name := "deid-gateway" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  serviceName: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 8 }}
+    spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: gateway
+          image: {{ include "scoutoss.image" (dict "root" . "name" "indexer") }}
+          args: ["scoutoss-indexer", "gateway"]
+          ports:
+            - { name: dicom, containerPort: 11112 }
+            - { name: http, containerPort: 8001 }
+          env:
+            {{- include "scoutoss.commonEnv" . | nindent 12 }}
+            - { name: PORT, value: "8001" }
+            - { name: GATEWAY_AE_TITLE, value: {{ .Values.gateway.aeTitle | quote }} }
+            - { name: GATEWAY_SPOOL, value: /spool }
+            - { name: GATEWAY_PROJECT_MAP, value: {{ .Values.gateway.projectMap | toJson | quote }} }
+            - { name: XNAT_DICOM_HOST, value: {{ .Values.external.xnat.dicomHost | quote }} }
+            - { name: XNAT_DICOM_PORT, value: {{ .Values.external.xnat.dicomPort | quote }} }
+            - { name: XNAT_DICOM_AE, value: {{ .Values.external.xnat.dicomAe | quote }} }
+            - { name: XNAT_ARCHIVER_USER, value: scout_archiver }
+            {{- range $k := list "DEID_DB_PASSWORD" "DEID_HMAC_SALT" "DEID_VAULT_KEY" "XNAT_ARCHIVER_PASSWORD" }}
+            {{- include "scoutoss.secretEnv" (dict "root" $ "key" $k) | nindent 12 }}
+            {{- end }}
+            - name: DEID_DATABASE_URL
+              value: {{ include "scoutoss.pgUrl" (dict "root" . "user" "deid_svc" "passwordVar" "DEID_DB_PASSWORD") | quote }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources: {{- toYaml .Values.gateway.resources | nindent 12 }}
+          volumeMounts:
+            - { name: spool, mountPath: /spool }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe: { httpGet: { path: /ready, port: http }, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /health, port: http }, initialDelaySeconds: 20, periodSeconds: 20 }
+      volumes: [{ name: tmp, emptyDir: {} }]
+  volumeClaimTemplates:
+    - metadata: { name: spool }
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.gateway.spool.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources: { requests: { storage: {{ .Values.gateway.spool.size }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  type: {{ .Values.gateway.service.type }}
+  {{- with .Values.gateway.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 4 }}
+  ports:
+    - { name: dicom, port: {{ .Values.gateway.service.port }}, targetPort: dicom }
+    - { name: http, port: 8001, targetPort: http }
+{{- end }}

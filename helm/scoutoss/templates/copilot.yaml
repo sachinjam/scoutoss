@@ -1,0 +1,84 @@
+{{- $name := "copilot" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: {{ .Values.copilot.replicas }}
+  selector:
+    matchLabels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 8 }}
+    spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "scoutoss.image" (dict "root" . "name" "copilot") }}
+          args: ["scoutoss-copilot", "serve"]
+          ports: [{ name: http, containerPort: 8000 }]
+          env:
+            {{- include "scoutoss.commonEnv" . | nindent 12 }}
+            - { name: AUTH_AUDIENCE, value: scoutoss-copilot }
+            - { name: INDEXER_URL, value: "http://{{ include "scoutoss.fullname" . }}-indexer:8000" }
+            - { name: TOKEN_URL, value: "{{ .Values.external.keycloak.internalUrl }}/protocol/openid-connect/token" }
+            - { name: CLIENT_ID, value: scoutoss-copilot }
+            - { name: XNAT_PIPELINE_USER, value: scout_pipeline }
+            - { name: LLM_PROVIDER, value: {{ .Values.copilot.llm.provider | quote }} }
+            - { name: LLM_MODEL, value: {{ .Values.copilot.llm.model | quote }} }
+            - { name: LLM_BASE_URL, value: {{ .Values.copilot.llm.baseUrl | quote }} }
+            - { name: AZURE_OPENAI_ENDPOINT, value: {{ .Values.copilot.llm.azureEndpoint | quote }} }
+            - { name: AZURE_OPENAI_DEPLOYMENT, value: {{ .Values.copilot.llm.azureDeployment | quote }} }
+            - { name: AZURE_OPENAI_API_VERSION, value: {{ .Values.copilot.llm.azureApiVersion | quote }} }
+            {{- include "scoutoss.secretEnv" (dict "root" . "key" "COPILOT_DB_PASSWORD") | nindent 12 }}
+            - name: CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: KC_COPILOT_CLIENT_SECRET } }
+            - name: XNAT_PIPELINE_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: XNAT_PIPELINE_PASSWORD } }
+            - name: AZURE_OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: AZURE_OPENAI_API_KEY, optional: true } }
+            - name: LLM_API_KEY
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: LLM_API_KEY, optional: true } }
+            - name: DATABASE_URL
+              value: {{ include "scoutoss.pgUrl" (dict "root" . "user" "copilot_app" "passwordVar" "COPILOT_DB_PASSWORD") | quote }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources: {{- toYaml .Values.copilot.resources | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          {{- include "scoutoss.probes" . | nindent 10 }}
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  selector: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 4 }}
+  ports: [{ name: http, port: 8000, targetPort: http }]
+{{- if .Values.copilot.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ include "scoutoss.fullname" . }}-{{ $name }} }
+  minReplicas: {{ .Values.copilot.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.copilot.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ .Values.copilot.autoscaling.targetCPUUtilizationPercentage }} } }
+{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 6 }}

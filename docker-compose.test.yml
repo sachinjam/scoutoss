@@ -1,0 +1,54 @@
+# Test overlay. Used two ways:
+#   CI e2e:      COMPOSE_FILE=docker-compose.yml:docker-compose.test.yml make up && scripts/e2e.sh
+#                (faster polling, ephemeral XNAT/OpenSearch data on tmpfs, heuristic planner)
+#   in-network:  make test-in-docker  -> runs the integration suite in a container against
+#                dedicated throwaway Postgres + OpenSearch (no testcontainers needed)
+services:
+  indexer:
+    environment:
+      INDEXER_POLL_SECONDS: "2"
+      LOG_LEVEL: DEBUG
+  copilot:
+    environment:
+      LLM_PROVIDER: heuristic   # tests must never call a real LLM
+  opensearch:
+    environment:
+      OPENSEARCH_JAVA_OPTS: -Xms768m -Xmx768m
+
+  test-postgres:
+    profiles: [test]
+    image: postgres:15.20-alpine
+    environment: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: scoutoss }
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      retries: 30
+
+  test-opensearch:
+    profiles: [test]
+    image: opensearchproject/opensearch:2.19.3
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    tmpfs: [/usr/share/opensearch/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health"]
+      interval: 5s
+      retries: 40
+
+  test-runner:
+    profiles: [test]
+    image: ghcr.io/astral-sh/uv:0.12.10-python3.12-bookworm-slim
+    working_dir: /src
+    environment:
+      TEST_PG_DSN: postgresql://postgres:postgres@test-postgres:5432/scoutoss
+      TEST_OS_URL: http://test-opensearch:9200
+      UV_PROJECT_ENVIRONMENT: /tmp/venv
+    command: ["sh", "-c", "uv sync --frozen && uv run pytest tests/integration -m integration -v"]
+    volumes: [".:/src:ro"]
+    depends_on:
+      test-postgres: { condition: service_healthy }
+      test-opensearch: { condition: service_healthy }

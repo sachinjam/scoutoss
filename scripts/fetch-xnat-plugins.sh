@@ -18,8 +18,13 @@ for entry in "${PLUGINS[@]}"; do
   if [[ -n "${XNAT_PLUGIN_CACHE:-}" && -f "${XNAT_PLUGIN_CACHE}/$name" ]]; then
     cp "${XNAT_PLUGIN_CACHE}/$name" "$target.tmp"
   elif ! curl -fsSL --retry 3 "$url" -o "$target.tmp"; then
+    rm -f "$target.tmp"
+    if [[ "$name" == ohif-viewer-* && "${SCOUTOSS_ALLOW_MISSING_OHIF:-0}" == 1 ]]; then
+      echo "WARN $name: download failed; continuing WITHOUT the OHIF viewer (SCOUTOSS_ALLOW_MISSING_OHIF=1)" >&2
+      continue
+    fi
     echo "FAIL $name: download failed. Put the jar in \$XNAT_PLUGIN_CACHE or set OHIF_PLUGIN_URL." >&2
-    rm -f "$target.tmp"; exit 1
+    exit 1
   fi
   got="$(sha "$target.tmp")"
   if [[ "$got" != "$want" ]]; then

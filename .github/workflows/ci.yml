@@ -1,0 +1,171 @@
+# ScoutOSS CI. Every job is required by branch protection on main (see docs/runbook.md),
+# so a PR cannot merge unless lint, tests (>=80% coverage), image builds, the Trivy scan,
+# Helm lint and the compose end-to-end test all pass.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.10"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { version: "${{ env.UV_VERSION }}", python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: uv sync --frozen
+      - name: ruff
+        run: |
+          uv run ruff check services scripts tests conftest.py
+          uv run ruff format --check services scripts tests conftest.py
+      - name: mypy --strict
+        run: uv run mypy --strict services/common/scoutoss_common services/indexer/scoutoss_indexer services/copilot/scoutoss_copilot
+      - name: generated files are up to date
+        run: |
+          python3 scripts/gen_dashboards.py
+          python3 scripts/gen_mirth_channel.py
+          git diff --exit-code -- dashboards services/hl7-gateway/channel
+
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { version: "${{ env.UV_VERSION }}", python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: uv sync --frozen
+      - name: unit tests (coverage gate 80%)
+        run: uv run pytest services --cov --cov-report=term --cov-report=xml:coverage-unit.xml --cov-fail-under=80
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage-unit, path: coverage-unit.xml }
+
+  integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { version: "${{ env.UV_VERSION }}", python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: uv sync --frozen
+      - name: unit + integration (testcontainers Postgres 15 + OpenSearch 2.19), combined coverage gate
+        run: uv run pytest services tests/integration --cov --cov-report=term --cov-report=xml:coverage.xml --cov-fail-under=80
+      - uses: actions/upload-artifact@v4
+        with: { name: coverage, path: coverage.xml }
+
+  ui:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: services/ui } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.21", cache: npm, cache-dependency-path: services/ui/package-lock.json }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  helm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with: { version: v3.18.4 }
+      - run: helm lint helm/scoutoss
+      - run: helm template scoutoss helm/scoutoss > /tmp/rendered.yaml
+      - name: kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -strict -summary -ignore-missing-schemas /tmp/rendered.yaml
+
+  images:
+    runs-on: ubuntu-24.04
+    needs: [lint, unit]
+    strategy:
+      matrix:
+        include:
+          - { name: indexer, context: ., dockerfile: services/indexer/Dockerfile }
+          - { name: copilot, context: ., dockerfile: services/copilot/Dockerfile }
+          - { name: ui, context: services/ui, dockerfile: services/ui/Dockerfile }
+          - { name: notebooks, context: services/notebooks, dockerfile: services/notebooks/Dockerfile }
+          - { name: qc, context: services/pipelines/qc, dockerfile: services/pipelines/qc/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          tags: scoutoss/${{ matrix.name }}:ci
+          load: true
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: image runs as non-root
+        run: |
+          user="$(docker image inspect scoutoss/${{ matrix.name }}:ci --format '{{.Config.User}}')"
+          echo "user=$user"; test -n "$user" && test "$user" != "root" && test "$user" != "0"
+      - name: trivy (fail on fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: scoutoss/${{ matrix.name }}:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+  trivy-config:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: trivy config scan (Dockerfiles, compose, Helm)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          skip-dirs: services/ui/node_modules
+
+  e2e:
+    runs-on: ubuntu-24.04
+    needs: [integration, images]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { version: "${{ env.UV_VERSION }}", python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: uv sync --frozen
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dcmtk
+      - name: resolve *.localhost
+        run: echo "127.0.0.1 app.localhost xnat.localhost auth.localhost" | sudo tee -a /etc/hosts
+      - name: make up (compose + test overlay)
+        env:
+          COMPOSE_FILE: docker-compose.yml:docker-compose.test.yml
+          OHIF_PLUGIN_URL: ${{ vars.OHIF_PLUGIN_URL }}
+          # The OHIF plugin is not publicly downloadable from CI runners; set the repo variable
+          # OHIF_PLUGIN_URL to a mirror to include it. The e2e test does not depend on it.
+          SCOUTOSS_ALLOW_MISSING_OHIF: "1"
+        run: make up
+      - name: seed + e2e smoke test
+        env: { COMPOSE_FILE: "docker-compose.yml:docker-compose.test.yml" }
+        run: |
+          make seed
+          scripts/e2e.sh
+      - name: logs on failure
+        if: failure()
+        env: { COMPOSE_FILE: "docker-compose.yml:docker-compose.test.yml" }
+        run: docker compose logs --no-color --tail=300 > compose-logs.txt || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: compose-logs, path: compose-logs.txt }
