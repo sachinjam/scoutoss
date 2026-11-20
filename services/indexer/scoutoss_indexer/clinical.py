@@ -160,6 +160,10 @@ class ClinicalEvent(BaseModel):
         return v
 
 
+class ClinicalIngestError(RuntimeError):
+    """Some documents could not be indexed (they are in the DLQ); the sender should retry."""
+
+
 class ClinicalRepo(Protocol):
     def save(self, patients: dict[str, str | None], events: list[dict[str, Any]]) -> None: ...
 
@@ -326,8 +330,20 @@ class ClinicalIngestor:
             {"_op_type": "index", "_index": CLINICAL_INDEX, "_id": d["event_id"], "_source": d}
             for d in docs
         ]
-        ok, _ = helpers.bulk(self.store.client, actions, refresh=True)
+        ok, errors = helpers.bulk(
+            self.store.client, actions, refresh=True, raise_on_error=False, raise_on_exception=False
+        )
         DOCS_INDEXED.labels(CLINICAL_INDEX).inc(int(ok))
+        if errors:
+            for failure in errors:
+                info: dict[str, Any] = next(iter(failure.values()), {}) if isinstance(failure, dict) else {}
+                self.store.dead_letter(
+                    ref=f"hl7:{info.get('_id', '?')}",
+                    source="hl7",
+                    stage="index",
+                    error=str(info.get("error", {}).get("type", "index_error")),
+                )
+            raise ClinicalIngestError(f"{len(errors)} clinical document(s) failed to index")
         self.store.rollup_patients(patients.keys())
         log.info(
             "clinical events ingested", messages=len(events), docs=len(docs), patients=len(patients)

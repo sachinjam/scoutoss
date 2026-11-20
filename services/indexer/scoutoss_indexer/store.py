@@ -69,6 +69,12 @@ class IndexStore:
                 except Exception as exc:  # another replica won the race
                     if "resource_already_exists_exception" not in str(exc):
                         raise
+            else:
+                # Mappings evolve additively: new fields are added to existing indices.
+                # (Type changes need a reindex — see docs/runbook.md.)
+                props = body.get("mappings", {}).get("properties", {})
+                if props:
+                    self.client.indices.put_mapping(index=name, body={"properties": props})
         if created:
             log.info("indices created", indices=created)
         return created

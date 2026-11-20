@@ -26,7 +26,7 @@ from scoutoss_common.catalog import (
 )
 from scoutoss_common.web import client_ip, install_observability
 from scoutoss_indexer import SERVICE_NAME
-from scoutoss_indexer.clinical import ClinicalEvent, ClinicalIngestor
+from scoutoss_indexer.clinical import ClinicalEvent, ClinicalIngestError, ClinicalIngestor
 from scoutoss_indexer.cursor import CursorStore
 from scoutoss_indexer.store import IndexStore
 from scoutoss_indexer.worker import Worker
@@ -186,7 +186,10 @@ def create_app(deps: IndexerDeps | None = None, *, build: bool = True) -> FastAP
         _audit(
             d, principal, "clinical_ingest", "clinical_events", {"n": len(batch.events)}, request
         )
-        result = d.clinical.ingest(batch.events)
+        try:
+            result = d.clinical.ingest(batch.events)
+        except ClinicalIngestError as exc:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
         return {"status": "ok", **result}
 
     return app

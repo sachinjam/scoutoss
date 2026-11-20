@@ -217,10 +217,13 @@ def main() -> int:
         json={"question": "patients under 85 with lung cancer AND CT chest"},
         headers=headers,
     ).json()
+    clinical = opensearch("/clinical_events/_count")["count"]
     step(
         "copilot-cross-modal",
-        "cohort_count" in cross and len(cross["generated_query"]["steps"]) == 2,
+        len(cross.get("generated_query", {}).get("steps", [])) == 2
+        and (clinical == 0 or cross.get("cohort_count", 0) >= 1),
         patients=cross.get("cohort_count"),
+        clinical_events=clinical,
     )
 
     if not args.skip_pipeline:

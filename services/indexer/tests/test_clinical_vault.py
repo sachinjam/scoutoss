@@ -98,3 +98,17 @@ def test_memory_vault_offsets_stable() -> None:
     v = MemoryVault()
     first = v.project_offset("A")
     assert v.project_offset("A") == first and -730 <= first <= -30
+
+
+def test_index_failures_are_dead_lettered_and_raised(fake_os: FakeOpenSearch, salt: bytes) -> None:
+    from scoutoss_indexer.clinical import ClinicalIngestError
+
+    store = IndexStore(fake_os)  # type: ignore[arg-type]
+    store.ensure_indices()
+    fake_os.fail_index.add("clinical_events")
+    ing = ClinicalIngestor(
+        store, MemoryClinicalRepo(), salt=salt, vault=MemoryVault(), default_project="P"
+    )
+    with pytest.raises(ClinicalIngestError, match="failed to index"):
+        ing.ingest([_event()])
+    assert {d["stage"] for d in fake_os.docs("indexer_dlq")} == {"index"}

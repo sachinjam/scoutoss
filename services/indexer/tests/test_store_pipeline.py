@@ -27,7 +27,14 @@ def _pipeline(store: IndexStore, salt: bytes) -> Pipeline:
 
 
 def test_ensure_indices_idempotent(store: IndexStore, fake_os: FakeOpenSearch) -> None:
+    import copy
+
+    fake_os.mappings["clinical_events"] = copy.deepcopy(fake_os.mappings["clinical_events"])
+    fake_os.mappings["clinical_events"]["mappings"]["properties"].pop("project")
     assert store.ensure_indices() == []
+    assert (
+        "project" in fake_os.mappings["clinical_events"]["mappings"]["properties"]
+    )  # additive update
     assert {SERIES_INDEX, STUDIES_INDEX, PATIENTS_INDEX, DLQ_INDEX, "audit"} <= set(fake_os.data)
 
 

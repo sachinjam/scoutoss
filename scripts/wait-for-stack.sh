@@ -2,7 +2,7 @@
 # Wait for the one-shot bootstrap jobs to finish successfully, then run the health check.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-JOBS=(${BOOTSTRAP_JOBS:-pipeline-images xnat-setup opensearch-setup})
+JOBS=(${BOOTSTRAP_JOBS:-pipeline-images xnat-setup opensearch-setup mirth-setup})
 deadline=$(( $(date +%s) + ${WAIT_TIMEOUT:-1800} ))
 for job in "${JOBS[@]}"; do
   cid="$(docker compose ps -a -q "$job" 2>/dev/null || true)"

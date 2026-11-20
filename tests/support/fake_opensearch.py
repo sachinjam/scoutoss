@@ -209,6 +209,12 @@ class _Indices:
         self.p.data.pop(index, None)
         return {"acknowledged": True}
 
+    def put_mapping(self, index: str, body: dict[str, Any], **_: Any) -> dict[str, Any]:
+        self.p.mappings.setdefault(index, {}).setdefault("mappings", {}).setdefault(
+            "properties", {}
+        ).update(body.get("properties", {}))
+        return {"acknowledged": True}
+
     def get_mapping(self, index: str, **_: Any) -> dict[str, Any]:
         return {index: self.p.mappings.get(index, {})}
 

@@ -168,11 +168,15 @@ def make_auth_dependency(
     """Build a FastAPI dependency that authenticates the request."""
 
     def authenticate(request: Request) -> Principal:
-        token = bearer_token(request)
+        try:
+            token = bearer_token(request)
+        except HTTPException:
+            request.state.auth_error = "missing bearer token"
+            raise
         try:
             principal = get_validator().principal(token)
         except AuthError as exc:
-            structlog.contextvars.bind_contextvars(auth_error=str(exc))
+            request.state.auth_error = str(exc)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=str(exc),

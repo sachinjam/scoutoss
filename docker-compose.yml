@@ -350,6 +350,36 @@ services:
       opensearch: { condition: service_healthy }
       keycloak: { condition: service_healthy }
 
+  # HL7v2 interface engine (Mirth Connect 4.5.2, the last MPL-licensed release).
+  mirth:
+    <<: *hardening
+    image: nextgenhealthcare/connect:4.5.2
+    ports:
+      - "127.0.0.1:${MLLP_PORT:-26661}:6661"
+    environment:
+      DATABASE: postgres
+      DATABASE_URL: jdbc:postgresql://scout-db:5432/mirthdb
+      DATABASE_USERNAME: mirth
+      DATABASE_PASSWORD: ${MIRTH_DB_PASSWORD}
+      DATABASE_MAX_CONNECTIONS: "20"
+      VMOPTIONS: -Xmx512m
+      KC_TOKEN_URL: http://keycloak:8080/realms/scoutoss/protocol/openid-connect/token
+      KC_MIRTH_CLIENT_ID: scoutoss-mirth
+      KC_MIRTH_CLIENT_SECRET: ${KC_MIRTH_CLIENT_SECRET}
+      INDEXER_URL: http://indexer:8000
+      SCOUT_PROJECT: ${DEFAULT_PROJECT:-SCOUT_DEMO}
+    volumes:
+      - mirth-appdata:/opt/connect/appdata
+    labels: { scoutoss.service: mirth }
+    depends_on:
+      scout-db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsk -o /dev/null https://localhost:8443/api/server/version -H 'X-Requested-With: OpenAPI' -w '%{http_code}' | grep -qE '200|401' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+
   # ------------------------------------------------------------------ one-shot bootstrap jobs
   opensearch-setup:
     image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}
@@ -387,6 +417,20 @@ services:
       xnat-web: { condition: service_healthy }
       pipeline-images: { condition: service_completed_successfully }
 
+  mirth-setup:
+    image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}
+    restart: "no"
+    command: ["python", "/bootstrap/scripts/bootstrap/mirth.py"]
+    environment:
+      BOOTSTRAP_ROOT: /bootstrap
+      MIRTH_URL: https://mirth:8443
+      MIRTH_ADMIN_PASSWORD: ${MIRTH_ADMIN_PASSWORD}
+    volumes:
+      - ./scripts:/bootstrap/scripts:ro
+      - ./services/hl7-gateway:/bootstrap/services/hl7-gateway:ro
+    depends_on:
+      mirth: { condition: service_healthy }
+
   # Builds pipeline images inside the isolated job engine so XNAT can launch them.
   pipeline-images:
     image: docker:29.0.4-cli
@@ -410,3 +454,4 @@ volumes:
   job-engine:
   opensearch:
   gateway-spool:
+  mirth-appdata:

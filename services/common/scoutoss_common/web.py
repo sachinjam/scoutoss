@@ -61,6 +61,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                     status=status,
                     latency_ms=round(elapsed * 1000, 2),
                     user_id=getattr(principal, "pseudonym", None),
+                    auth_error=getattr(request.state, "auth_error", None),
                 )
 
 
