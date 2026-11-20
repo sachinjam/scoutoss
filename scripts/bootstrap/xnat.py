@@ -55,17 +55,39 @@ class Xnat:
         return resp.json() if resp.content else None
 
 
-def admin_session() -> Xnat:
+def admin_session(attempts: int = 8, grace: float = 60, every: float = 45) -> Xnat:
+    """Log in as admin without tripping XNAT's failed-login lockout.
+
+    XNAT answers HTTP before its auth records exist on first boot, and every wrong password
+    counts towards the lockout. So: wait a grace period, try the first-boot default first
+    (only valid on a fresh install), then the configured password, and pace the attempts so
+    a whole run stays well under the lockout threshold.
+    """
+    import time
+
     wanted = env("XNAT_ADMIN_PASSWORD")
-    probe = httpx.get(f"{XNAT}/xapi/siteConfig/buildInfo", auth=("admin", wanted), timeout=30)
-    if probe.status_code == 200:
-        return Xnat("admin", wanted)
-    first = Xnat("admin", "admin")
-    if first.http.get("/xapi/siteConfig/buildInfo").status_code != 200:
-        fail(JOB, "cannot log in as admin with XNAT_ADMIN_PASSWORD or the first-boot default")
-    first.call("PUT", "/xapi/users/admin", json={"password": wanted})
-    log(JOB, "admin password rotated from first-boot default")
-    return Xnat("admin", wanted)
+    time.sleep(grace)
+    for attempt in range(1, attempts + 1):
+        for password in ("admin", wanted):
+            try:
+                ok = (
+                    httpx.get(
+                        f"{XNAT}/xapi/siteConfig/buildInfo", auth=("admin", password), timeout=30
+                    ).status_code
+                    == 200
+                )
+            except httpx.HTTPError:
+                ok = False
+            if not ok:
+                continue
+            if password == "admin":  # noqa: S105 - XNAT first-boot default, rotated below
+                Xnat("admin", "admin").call("PUT", "/xapi/users/admin", json={"password": wanted})
+                log(JOB, "admin password rotated from first-boot default")
+            return Xnat("admin", wanted)
+        log(JOB, "XNAT not ready for admin login yet", attempt=attempt, of=attempts)
+        time.sleep(every)
+    fail(JOB, "cannot log in as admin with XNAT_ADMIN_PASSWORD or the first-boot default")
+    raise SystemExit(1)
 
 
 def configure_site(x: Xnat) -> None:
