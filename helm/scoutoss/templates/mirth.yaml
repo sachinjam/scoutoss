@@ -16,6 +16,15 @@ spec:
       labels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 8 }}
     spec:
       securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      initContainers:
+        # The image's entrypoint rewrites conf/ and mcserver.vmoptions under /opt/connect, so the
+        # app directory is copied to an ephemeral volume and the root filesystem stays read-only.
+        - name: app-copy
+          image: {{ .Values.mirth.image }}
+          command: ["sh", "-c", "cp -a /opt/connect/. /work/"]
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          resources: {{- toYaml .Values.mirth.resources | nindent 12 }}
+          volumeMounts: [{ name: app, mountPath: /work }]
       containers:
         - name: mirth
           image: {{ .Values.mirth.image }}
@@ -34,10 +43,16 @@ spec:
               valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: KC_MIRTH_CLIENT_SECRET } }
             - { name: INDEXER_URL, value: "http://{{ include "scoutoss.fullname" . }}-indexer:8000" }
             - { name: SCOUT_PROJECT, value: {{ .Values.global.defaultProject | quote }} }
-          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
           resources: {{- toYaml .Values.mirth.resources | nindent 12 }}
-          volumeMounts: [{ name: appdata, mountPath: /opt/connect/appdata }]
+          volumeMounts:
+            - { name: app, mountPath: /opt/connect }
+            - { name: appdata, mountPath: /opt/connect/appdata }
+            - { name: tmp, mountPath: /tmp }
           readinessProbe: { tcpSocket: { port: mllp }, periodSeconds: 10 }
+      volumes:
+        - { name: app, emptyDir: { sizeLimit: 512Mi } }
+        - { name: tmp, emptyDir: { sizeLimit: 256Mi } }
   volumeClaimTemplates:
     - metadata: { name: appdata }
       spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 2Gi } } }

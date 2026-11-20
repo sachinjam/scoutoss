@@ -8,6 +8,9 @@ COPY . .
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.29-alpine
+# Pick up Alpine security fixes released after the base image (CI Trivy gate).
+USER root
+RUN apk upgrade --no-cache
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker-entrypoint.d/40-config.sh /docker-entrypoint.d/40-config.sh
 COPY --from=build /src/dist /usr/share/nginx/html

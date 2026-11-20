@@ -28,6 +28,8 @@ c.GenericOAuthenticator.userdata_url = f"{internal}/protocol/openid-connect/user
 c.GenericOAuthenticator.scope = ["openid", "profile", "email"]
 c.GenericOAuthenticator.username_claim = "preferred_username"
 c.GenericOAuthenticator.claim_groups_key = "groups"
+# oauthenticator >= 16 refuses claim_groups_key without manage_groups (hub exits at start).
+c.GenericOAuthenticator.manage_groups = True
 c.GenericOAuthenticator.allow_all = True
 c.GenericOAuthenticator.enable_auth_state = False
 

@@ -21,6 +21,8 @@ FROM python:3.12.12-slim
 LABEL org.opencontainers.image.source="https://github.com/scoutoss/scoutoss" \
       org.opencontainers.image.title="scoutoss-indexer" \
       org.opencontainers.image.licenses="Apache-2.0"
+# Pick up Debian security fixes released after the pinned base image (CI Trivy gate).
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 RUN groupadd -g 10001 scout && useradd -u 10001 -g scout -r -s /usr/sbin/nologin scout
 COPY --from=build /app/.venv /app/.venv
 RUN mkdir -p /spool /data && chown 10001:10001 /spool /data

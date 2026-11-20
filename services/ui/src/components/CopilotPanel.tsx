@@ -46,7 +46,9 @@ export function CopilotPanel({ api, canWrite }: { api: CopilotApi; canWrite: boo
       .catch(() => setPipelines([]));
   }, [api, canWrite]);
 
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [turns]);
+  useEffect(() => {
+    void bottom.current?.scrollIntoView({ behavior: "smooth" });
+  }, [turns]);
 
   const update = (id: number, patch: Partial<Turn>) =>
     setTurns((ts) => ts.map((t) => (t.id === id ? { ...t, ...patch } : t)));
@@ -140,8 +142,8 @@ export function CopilotPanel({ api, canWrite }: { api: CopilotApi; canWrite: boo
             {t.result && (
               <>
                 <div className="metrics">
-                  <span><strong>{t.result.cohort_count}</strong> patients</span>
-                  <span><strong>{t.result.study_count}</strong> studies</span>
+                  <span><strong>{t.result.cohort_count}</strong> {t.result.cohort_count === 1 ? "patient" : "patients"}</span>
+                  <span><strong>{t.result.study_count}</strong> {t.result.study_count === 1 ? "study" : "studies"}</span>
                   <span className="muted">planner: {t.result.provider}</span>
                 </div>
                 <div className="charts">

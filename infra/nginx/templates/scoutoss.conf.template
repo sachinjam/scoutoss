@@ -53,6 +53,11 @@ server {
   proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Forwarded-Host  $host:${HTTPS_PORT};
   proxy_set_header X-Forwarded-Port  ${HTTPS_PORT};
+  # oauth2-proxy's session cookie carries the Keycloak tokens; with project groups it outgrows
+  # nginx's default 4-8k header buffer ("upstream sent too big header" -> 502 on /oauth2/callback).
+  proxy_buffer_size       32k;
+  proxy_buffers           8 32k;
+  proxy_busy_buffers_size 64k;
 
   location / {
     proxy_pass $ui;

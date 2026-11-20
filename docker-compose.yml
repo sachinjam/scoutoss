@@ -432,6 +432,12 @@ services:
       OAUTH_CLIENT_SECRET: ${KC_NOTEBOOKS_CLIENT_SECRET}
     volumes:
       - notebooks:/home/jovyan/work
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/notebooks/hub/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     labels: { scoutoss.service: notebooks }
     depends_on:
       keycloak: { condition: service_healthy }

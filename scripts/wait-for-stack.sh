@@ -19,7 +19,9 @@ for job in "${JOBS[@]}"; do
 done
 # then every long-running service with a healthcheck must report healthy
 while :; do
-  unhealthy="$(docker compose ps --format '{{.Service}} {{.Health}}' --status running | awk '$2 != "" && $2 != "healthy" {print $1}')"
+  # long-running services: anything restarting/exited, or with a healthcheck that is not healthy yet
+  unhealthy="$(docker compose ps -a --format '{{.Service}} {{.State}} {{.Health}}' \
+    | awk -v jobs=" ${JOBS[*]} " 'index(jobs, " " $1 " ") == 0 && ($2 != "running" || ($3 != "" && $3 != "healthy")) {print $1 "(" $2 ")"}')"
   [[ -z "$unhealthy" ]] && break
   (( $(date +%s) > deadline )) && { echo "TIMEOUT: not healthy: $unhealthy"; exit 1; }
   sleep 5

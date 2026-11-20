@@ -16,26 +16,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from e2e import ENV, PORT, edge
 
 
-def main() -> int:
+def login(username: str) -> bool:
     client = edge()
     client.follow_redirects = True
     page = client.get(f"https://app.localhost:{PORT}/dashboards/app/home")
     if "auth.localhost" not in str(page.url):
         print(f"expected Keycloak login, got {page.url}")
-        return 1
+        return False
     action = re.search(r'id="kc-form-login"[^>]*action="([^"]+)"', page.text) or re.search(
         r'action="([^"]+login-actions/authenticate[^"]+)"', page.text
     )
     if not action:
         print("login form not found")
-        return 1
+        return False
     resp = client.post(
         unescape(action.group(1)),
-        data={"username": "viewer", "password": ENV["DEMO_USER_PASSWORD"]},
+        data={"username": username, "password": ENV["DEMO_USER_PASSWORD"]},
     )
     ok = resp.status_code == 200 and "/dashboards/" in str(resp.url) and "osd" in resp.text.lower()
-    print({"final_url": str(resp.url).split("?")[0], "status": resp.status_code, "ok": ok})
-    return 0 if ok else 1
+    print(
+        {
+            "user": username,
+            "final_url": str(resp.url).split("?")[0],
+            "status": resp.status_code,
+            "ok": ok,
+        }
+    )
+    return ok
+
+
+def main() -> int:
+    # researcher carries project groups, so its session cookie is the largest (nginx buffers).
+    results = [login(user) for user in ("viewer", "researcher")]
+    return 0 if all(results) else 1
 
 
 if __name__ == "__main__":
