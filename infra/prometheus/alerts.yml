@@ -1,0 +1,31 @@
+groups:
+  - name: scoutoss
+    rules:
+      - alert: IndexerDeadLetters
+        expr: sum(increase(indexer_dlq_total[15m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Indexer routed items to the DLQ in the last 15 minutes"
+          description: "Inspect the indexer_dlq index (stage/error_type) and re-run /reindex after fixing the cause."
+      - alert: CopilotValidationFailureRateHigh
+        expr: |
+          sum(rate(copilot_query_validation_failures_total[10m]))
+            / clamp_min(sum(rate(copilot_queries_total[10m])) + sum(rate(copilot_query_validation_failures_total[10m])), 1e-9)
+          > 0.05
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "More than 5% of generated queries were rejected by the validator"
+          description: "Check the LLM provider/prompt; a spike can also indicate prompt-injection attempts (see audit index, outcome=rejected)."
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.job }} health/metrics endpoint failing for more than 2 minutes"
+      - alert: IndexerStalled
+        expr: time() - indexer_last_success_timestamp_seconds > 600
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Indexer has not completed a poll cycle for 10 minutes"

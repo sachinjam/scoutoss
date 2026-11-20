@@ -1,0 +1,36 @@
+# Ship ScoutOSS container logs (structured JSON) via Logstash to OpenSearch logs-YYYY.MM.DD.
+# Retention: 30 days via the ISM policy `logs-retention` (scripts/bootstrap/opensearch.py).
+#
+# Filebeat 7.12 (the last OSS build OpenSearch supports) cannot talk to the Docker 29 API,
+# so instead of docker autodiscover it tails the json-file logs directly and keeps only
+# events emitted by ScoutOSS services (every one carries a top-level `service` field).
+filebeat.inputs:
+  - type: container
+    paths: ["/var/lib/docker/containers/*/*.log"]
+    format: docker
+    json.keys_under_root: true
+    json.overwrite_keys: true
+    json.add_error_key: false
+    json.ignore_decoding_error: true
+
+processors:
+  - drop_event:
+      when:
+        not:
+          or:
+            - equals: { service: indexer }
+            - equals: { service: copilot }
+            - equals: { service: deid-gateway }
+            - equals: { service: proxy }
+            - regexp: { service: "^bootstrap-" }
+  - drop_fields:
+      fields: ["agent", "ecs", "host", "input", "log", "stream", "container"]
+      ignore_missing: true
+
+setup.ilm.enabled: false
+setup.template.enabled: false
+# -> Logstash OSS (OpenSearch output plugin) -> OpenSearch logs-YYYY.MM.dd
+output.logstash:
+  hosts: ["logstash:5044"]
+logging.level: warning
+logging.json: true
