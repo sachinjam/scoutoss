@@ -336,7 +336,9 @@ class ClinicalIngestor:
         DOCS_INDEXED.labels(CLINICAL_INDEX).inc(int(ok))
         if errors:
             for failure in errors:
-                info: dict[str, Any] = next(iter(failure.values()), {}) if isinstance(failure, dict) else {}
+                info: dict[str, Any] = (
+                    next(iter(failure.values()), {}) if isinstance(failure, dict) else {}
+                )
                 self.store.dead_letter(
                     ref=f"hl7:{info.get('_id', '?')}",
                     source="hl7",

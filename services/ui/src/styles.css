@@ -1,0 +1,54 @@
+:root {
+  --bg: #f7f8fa; --panel: #ffffff; --text: #111827; --muted: #6b7280; --line: #e5e7eb;
+  --accent: #2563eb; --accent-ink: #ffffff; --warn: #92400e; --warn-bg: #fef3c7; --err: #b91c1c;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); background: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1115; --panel: #171a21; --text: #e5e7eb; --muted: #9ca3af; --line: #2a2f3a;
+          --accent: #60a5fa; --accent-ink: #0b1220; --warn: #fcd34d; --warn-bg: #3a2e0a; --err: #f87171; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); }
+.shell { display: flex; flex-direction: column; height: 100vh; }
+header { display: flex; align-items: center; gap: 24px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+header h1 { font-size: 18px; margin: 0; }
+.logo { color: var(--accent); }
+nav { display: flex; gap: 6px; flex: 1; }
+nav button, nav a { background: none; border: 0; color: var(--muted); padding: 6px 10px; border-radius: 6px; cursor: pointer; font: inherit; text-decoration: none; }
+nav button.active { color: var(--text); background: var(--bg); }
+.user { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 14px; }
+.role { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+button { font: inherit; }
+.user button, .actions button, .composer button { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+.composer button:disabled { opacity: .5; cursor: default; }
+main { flex: 1; overflow: hidden; display: flex; }
+.dashboards { border: 0; width: 100%; height: 100%; background: var(--panel); }
+.copilot { display: flex; flex-direction: column; width: 100%; max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+.transcript { flex: 1; overflow-y: auto; padding: 20px 0; }
+.empty { text-align: center; color: var(--muted); margin-top: 10vh; }
+.empty h2 { color: var(--text); font-weight: 600; }
+.examples { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+.chip { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+.turn { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+.question { font-weight: 600; margin: 0 0 8px; }
+.status, .muted { color: var(--muted); font-size: 13px; }
+.answer { line-height: 1.5; }
+.warning { color: var(--warn); background: var(--warn-bg); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+.error { color: var(--err); }
+.notice { color: var(--muted); font-size: 14px; }
+.metrics { display: flex; gap: 18px; font-size: 14px; margin: 8px 0; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.chart { margin: 0; overflow-x: auto; }
+.studies { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+.studies th, .studies td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.studies a { color: var(--accent); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.review { margin-top: 12px; }
+.review summary { cursor: pointer; color: var(--accent); font-size: 14px; }
+.review pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; font-size: 12px; max-height: 360px; }
+.actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.actions select { border: 1px solid var(--line); border-radius: 6px; padding: 6px; background: var(--panel); color: var(--text); }
+.composer { display: flex; gap: 8px; padding: 12px 0 4px; }
+.composer input { flex: 1; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; }
+.disclaimer { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+@media (max-width: 640px) { header { gap: 10px; } nav { order: 3; width: 100%; } .metrics { flex-wrap: wrap; } }

@@ -247,22 +247,17 @@ def test_stream_error_event(
 
 
 def _mock_xnat(router: respx.MockRouter, enabled: str = "true") -> respx.Route:
-    router.get(f"{XNAT}/xapi/commands").respond(
+    router.get(f"{XNAT}/xapi/commands/available").respond(
         json=[
             {
-                "image": "scoutoss/qc:0.1.0",
-                "xnat": [
-                    {
-                        "id": 7,
-                        "name": "scoutoss-qc-session",
-                        "label": "QC",
-                        "contexts": ["xnat:imageSessionData"],
-                    }
-                ],
+                "wrapper-id": 7,
+                "wrapper-name": "scoutoss-qc-session",
+                "wrapper-label": "QC",
+                "enabled": enabled == "true",
+                "wrapper-contexts": ["xnat:imageSessionData"],
             }
         ]
     )
-    router.get(f"{XNAT}/xapi/projects/SCOUT_DEMO/wrappers/7/enabled").respond(text=enabled)
     return router.post(f"{XNAT}/xapi/projects/SCOUT_DEMO/wrappers/7/root/session/launch").respond(
         json={"status": "success", "workflow-id": "w1"}
     )
@@ -307,7 +302,7 @@ def test_pipeline_limits_and_unconfigured(
         assert c.post(f"/cohorts/{cid}/pipeline", json={}, headers=H(make_token)).status_code == 413
         assert c.post("/cohorts/nope/pipeline", json={}, headers=H(make_token)).status_code == 404
         with respx.mock() as router:
-            router.get(f"{XNAT}/xapi/commands").respond(500)
+            router.get(f"{XNAT}/xapi/commands/available").respond(500)
             assert c.get("/pipelines", headers=H(make_token)).status_code == 502
     deps.pipelines = None
     with TestClient(create_app(deps)) as c:

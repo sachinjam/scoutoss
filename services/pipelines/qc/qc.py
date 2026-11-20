@@ -40,14 +40,10 @@ def scan_stats(files: list[Path]) -> dict[str, float | int | str]:
         thickness = float(ds.get("SliceThickness", 0) or 0)
         data = ds.get("PixelData")
         if data and int(ds.get("BitsAllocated", 16)) == 16:
-            fmt = (
-                f"<{len(data) // 2}h"
-                if int(ds.get("PixelRepresentation", 0))
-                else f"<{len(data) // 2}H"
-            )
-            sample.extend(struct.unpack(fmt, data[: (len(data) // 2) * 2])[::7])
+            n = len(data) // 2
+            fmt = f"<{n}h" if int(ds.get("PixelRepresentation", 0)) else f"<{n}H"
+            sample.extend(struct.unpack(fmt, data[: n * 2])[::7])
     mean, std = stats(sample)
-    snr = round(abs(mean) / std, 3) if std else 0.0
     return {
         "instances": len(files),
         "rows": rows,
@@ -55,9 +51,50 @@ def scan_stats(files: list[Path]) -> dict[str, float | int | str]:
         "slice_thickness": thickness,
         "mean": round(mean, 2),
         "std": round(std, 2),
-        "snr": snr,
-        "status": "pass" if len(files) > 0 and rows > 0 else "fail",
+        "min": min(sample) if sample else 0,
+        "max": max(sample) if sample else 0,
+        "snr": round(abs(mean) / std, 3) if std else 0.0,
+        "status": "pass" if files and rows > 0 else "fail",
     }
+
+
+def assessor_xml(
+    label: str,
+    project: str,
+    session_id: str,
+    results: dict[str, dict[str, float | int | str]],
+    overall: str,
+    today: str,
+) -> str:
+    """xnat:qcAssessmentData (QCAssessment): type is an attribute, per-scan statistics go in
+    scanStatistics (xnat:statisticsData), the overall rating in a custom field."""
+    scans = "".join(
+        f"<xnat:scan id={quoteattr(scan)}>"
+        f'<xnat:scanStatistics xsi:type="xnat:statisticsData">'
+        f"<xnat:mean>{r['mean']}</xnat:mean><xnat:snr>{r['snr']}</xnat:snr>"
+        f"<xnat:min>{r['min']}</xnat:min><xnat:max>{r['max']}</xnat:max>"
+        f"<xnat:stddev>{r['std']}</xnat:stddev></xnat:scanStatistics></xnat:scan>"
+        for scan, r in results.items()
+    )
+    summary = json.dumps(
+        {
+            s: {k: v for k, v in r.items() if k in ("instances", "rows", "cols", "status")}
+            for s, r in results.items()
+        }
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<xnat:QCAssessment xmlns:xnat="http://nrg.wustl.edu/xnat" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+        f'ID={quoteattr(label)} label={quoteattr(label)} project={quoteattr(project)} type="ScoutOSS-QC">'
+        f"<xnat:date>{today}</xnat:date>"
+        f"<xnat:note>{escape(summary)[:1000]}</xnat:note>"
+        f'<xnat:fields><xnat:field name="rating">{overall}</xnat:field>'
+        f'<xnat:field name="scans">{len(results)}</xnat:field></xnat:fields>'
+        f"<xnat:imageSession_ID>{escape(session_id)}</xnat:imageSession_ID>"
+        f"<xnat:scans>{scans}</xnat:scans>"
+        "</xnat:QCAssessment>\n"
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -76,24 +113,8 @@ def main(argv: list[str]) -> int:
     results = {scan: scan_stats(files) for scan, files in sorted(by_scan.items())}
     overall = "pass" if results and all(r["status"] == "pass" for r in results.values()) else "fail"
     now = datetime.now(UTC)
-    qc_label = f"{label}_SCOUTQC_{now.strftime('%Y%m%d%H%M%S')}"
-    scans_xml = "".join(
-        f"<xnat:scan><xnat:imageScan_ID>{escape(s)}</xnat:imageScan_ID><xnat:rating>{r['status']}</xnat:rating>"
-        f"<xnat:comments>{escape(json.dumps(r))}</xnat:comments></xnat:scan>"
-        for s, r in results.items()
-    )
-    xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<xnat:QCAssessment xmlns:xnat="http://nrg.wustl.edu/xnat" '
-        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
-        f"ID={quoteattr(qc_label)} label={quoteattr(qc_label)} project={quoteattr(project)}>"
-        f"<xnat:date>{now.date().isoformat()}</xnat:date>"
-        f"<xnat:imageSession_ID>{escape(session_id)}</xnat:imageSession_ID>"
-        "<xnat:type>ScoutOSS-QC</xnat:type>"
-        f"<xnat:rating>{overall}</xnat:rating>"
-        f"<xnat:scans>{scans_xml}</xnat:scans>"
-        "</xnat:QCAssessment>\n"
-    )
+    qc_label = f"{label}_SCOUTQC_{now.strftime('%Y%m%d%H%M%S')}"[:64]
+    xml = assessor_xml(qc_label, project, session_id, results, overall, now.date().isoformat())
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "qc.xml").write_text(xml)
     print(json.dumps({"msg": "qc complete", "scans": len(results), "rating": overall}))

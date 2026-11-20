@@ -350,6 +350,35 @@ services:
       opensearch: { condition: service_healthy }
       keycloak: { condition: service_healthy }
 
+  ui:
+    <<: *hardening
+    build: { context: services/ui }
+    image: scoutoss/ui:${SCOUTOSS_TAG:-dev}
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx]
+    environment:
+      KEYCLOAK_PUBLIC_URL: https://auth.localhost:${HTTPS_PORT:-24443}
+      KEYCLOAK_REALM: scoutoss
+      KEYCLOAK_CLIENT_ID: scoutoss-ui
+      DEFAULT_PROJECT: ${DEFAULT_PROJECT:-SCOUT_DEMO}
+    labels: { scoutoss.service: ui }
+
+  notebooks:
+    <<: *hardening
+    build: { context: services/notebooks }
+    image: scoutoss/notebooks:${SCOUTOSS_TAG:-dev}
+    environment:
+      PUBLIC_APP_URL: https://app.localhost:${HTTPS_PORT:-24443}
+      KEYCLOAK_PUBLIC_ISSUER: https://auth.localhost:${HTTPS_PORT:-24443}/realms/scoutoss
+      KEYCLOAK_INTERNAL_ISSUER: http://keycloak:8080/realms/scoutoss
+      OAUTH_CLIENT_ID: scoutoss-notebooks
+      OAUTH_CLIENT_SECRET: ${KC_NOTEBOOKS_CLIENT_SECRET}
+    volumes:
+      - notebooks:/home/jovyan/work
+    labels: { scoutoss.service: notebooks }
+    depends_on:
+      keycloak: { condition: service_healthy }
+
   # HL7v2 interface engine (Mirth Connect 4.5.2, the last MPL-licensed release).
   mirth:
     <<: *hardening
@@ -455,3 +484,4 @@ volumes:
   opensearch:
   gateway-spool:
   mirth-appdata:
+  notebooks:

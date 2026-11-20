@@ -229,7 +229,7 @@ def main() -> int:
     if not args.skip_pipeline:
         target = client.post(
             f"{api}/query",
-            json={"question": "CT chest studies in 2023", "session_id": "e2e-p"},
+            json={"question": "female patients with CT chest", "session_id": "e2e-p"},
             headers=headers,
         ).json()
         cohort = target["cohort_id"]

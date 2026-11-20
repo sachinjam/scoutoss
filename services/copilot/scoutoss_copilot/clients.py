@@ -126,34 +126,33 @@ class XnatPipelines:
         )
 
     def wrappers(self, project: str) -> list[dict[str, Any]]:
-        resp = self.http.get("/xapi/commands")
+        """Session-level pipelines enabled in ``project`` (readable by project members;
+        the per-wrapper ``/enabled`` endpoint needs owner rights)."""
+        resp = self.http.get(
+            "/xapi/commands/available",
+            params={"project": project, "xsiType": "xnat:imageSessionData"},
+        )
         resp.raise_for_status()
-        out = []
-        for command in resp.json():
-            for w in command.get("xnat", []):
-                out.append(
-                    {
-                        "id": w["id"],
-                        "name": w["name"],
-                        "label": w.get("label") or w["name"],
-                        "description": w.get("description", ""),
-                        "contexts": w.get("contexts", []),
-                        "image": command.get("image"),
-                    }
-                )
-        enabled = []
-        for w in out:
-            r = self.http.get(f"/xapi/projects/{project}/wrappers/{w['id']}/enabled")
-            if r.status_code == 200 and r.text.strip().lower() == "true":
-                enabled.append(w)
-        return enabled
+        return [
+            {
+                "id": w["wrapper-id"],
+                "name": w["wrapper-name"],
+                "label": w.get("wrapper-label") or w["wrapper-name"],
+                "description": w.get("wrapper-description", ""),
+                "contexts": w.get("wrapper-contexts", []),
+                "image": w.get("image-name"),
+                "root": w.get("root-element-name", "session"),
+            }
+            for w in resp.json()
+            if w.get("enabled")
+        ]
 
     def launch(self, project: str, wrapper: dict[str, Any], experiment_id: str) -> dict[str, Any]:
         if "xnat:imageSessionData" not in wrapper.get("contexts", []):
             raise PipelineError("pipeline does not run at session level")
         resp = self.http.post(
             f"/xapi/projects/{project}/wrappers/{wrapper['id']}/root/session/launch",
-            data={"session": f"/archive/experiments/{experiment_id}"},
+            json={"session": f"/archive/experiments/{experiment_id}"},  # XNAT requires JSON
         )
         if resp.status_code >= 400:
             raise PipelineError(f"launch failed with HTTP {resp.status_code}")

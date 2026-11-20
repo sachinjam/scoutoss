@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -136,27 +137,23 @@ def test_service_token_and_schema_client() -> None:
 def test_xnat_pipelines_client() -> None:
     base = "http://xnat"
     with respx.mock() as router:
-        router.get(f"{base}/xapi/commands").respond(
+        router.get(f"{base}/xapi/commands/available").respond(
             json=[
                 {
-                    "image": "scoutoss/qc:0.1.0",
-                    "xnat": [
-                        {
-                            "id": 7,
-                            "name": "scoutoss-qc-session",
-                            "contexts": ["xnat:imageSessionData"],
-                        },
-                        {
-                            "id": 8,
-                            "name": "totalsegmentator-scan",
-                            "contexts": ["xnat:imageScanData"],
-                        },
-                    ],
-                }
+                    "wrapper-id": 7,
+                    "wrapper-name": "scoutoss-qc-session",
+                    "enabled": True,
+                    "wrapper-contexts": ["xnat:imageSessionData"],
+                    "image-name": "scoutoss/qc:0.1.0",
+                },
+                {
+                    "wrapper-id": 9,
+                    "wrapper-name": "disabled-one",
+                    "enabled": False,
+                    "wrapper-contexts": ["xnat:imageSessionData"],
+                },
             ]
         )
-        router.get(f"{base}/xapi/projects/P/wrappers/7/enabled").respond(text="true")
-        router.get(f"{base}/xapi/projects/P/wrappers/8/enabled").respond(text="false")
         launch = router.post(f"{base}/xapi/projects/P/wrappers/7/root/session/launch").respond(
             json={"status": "success", "workflow-id": "123"}
         )
@@ -170,7 +167,9 @@ def test_xnat_pipelines_client() -> None:
             "workflow_id": "123",
             "container_id": None,
         }
-        assert b"session=%2Farchive%2Fexperiments%2FE1" in launch.calls.last.request.content
+        assert json.loads(launch.calls.last.request.content) == {
+            "session": "/archive/experiments/E1"
+        }
         with pytest.raises(PipelineError, match="session level"):
             client.launch("P", {"id": 8, "contexts": ["xnat:imageScanData"]}, "E1")
         launch.respond(500)

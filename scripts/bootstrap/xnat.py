@@ -176,7 +176,8 @@ def ensure_container_service(x: Xnat) -> list[str]:
         "swarm-mode": False,
         "pull-images-on-xnat-init": False,
         "auto-cleanup": True,
-        "container-user": "",
+        # job containers run as XNAT's uid so they can write the build (output) directory
+        "container-user": "1000:1000",
         "status-email-enabled": False,
     }
     x.call("POST", "/xapi/docker/server", json=server)
@@ -189,7 +190,7 @@ def ensure_container_service(x: Xnat) -> list[str]:
         if command["name"] in existing:
             cmd_id = existing[command["name"]]["id"]
             command["id"] = cmd_id
-            x.call("PUT", f"/xapi/commands/{cmd_id}", json=command, ok=(200, 201, 204, 409))
+            x.call("POST", f"/xapi/commands/{cmd_id}", json=command, ok=(200, 201, 204, 409))
         else:
             x.call("POST", "/xapi/commands", json=command, ok=(200, 201, 409))
         current = {c["name"]: c for c in x.json("GET", "/xapi/commands") or []}[command["name"]]
