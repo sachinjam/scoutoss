@@ -16,7 +16,7 @@ EHR ─HL7─▶ Mirth ───────────────────
 ```bash
 make up      # generates .env + dev TLS certs, fetches XNAT plugins, boots and bootstraps everything
 make seed    # 10 synthetic fake-PHI studies (7 patients) + 13 HL7 messages
-make e2e     # C-STORE → XNAT → searchable < 60 s → copilot → pipeline → assessor → audit → SSO
+make e2e     # C-STORE → XNAT → searchable < 60 s → copilot → pipeline → assessor → audit → SSO → UI in a browser
 ```
 
 Open https://app.localhost:24443 and sign in as `researcher`; the password is

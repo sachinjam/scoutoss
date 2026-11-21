@@ -147,6 +147,10 @@ jobs:
         with: { version: "${{ env.UV_VERSION }}", python-version: "${{ env.PYTHON_VERSION }}" }
       - run: uv sync --frozen
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dcmtk
+      - name: browser for the UI smoke test
+        run: |
+          uv sync --frozen --group e2e
+          uv run --frozen --group e2e playwright install --with-deps chromium
       - name: resolve *.localhost
         run: echo "127.0.0.1 app.localhost xnat.localhost auth.localhost" | sudo tee -a /etc/hosts
       - name: make up (compose + test overlay)
@@ -169,3 +173,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with: { name: compose-logs, path: compose-logs.txt }
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: ui-smoke-screenshots, path: artifacts/ui-smoke/, if-no-files-found: ignore }

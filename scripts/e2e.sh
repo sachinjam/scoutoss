@@ -5,6 +5,7 @@
 #   3. within 60 s: study in XNAT (pseudonymized), doc in OpenSearch, Dashboards search hit
 #   4. copilot answers "how many CT studies" (count >= 1) and the cross-modal question
 #   5. QC pipeline launched on the cohort -> assessor appears in XNAT; actions audited
+#   6. Keycloak SSO into Dashboards, then a real-browser pass over the UI (scripts/ui_smoke.py)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PY="${PY:-uv run --frozen python}"
@@ -27,4 +28,6 @@ echo "== checks"
 $PY scripts/e2e.py --mrn "$mrn" --start "$start" "$@"
 echo "== SSO (Keycloak -> oauth2-proxy -> OpenSearch Dashboards)"
 $PY scripts/check_sso.py
+echo "== UI (headless browser)"
+[[ "${SKIP_UI:-0}" == 1 ]] && echo "(skipped)" || uv run --frozen --group e2e python scripts/ui_smoke.py
 echo "E2E PASSED"

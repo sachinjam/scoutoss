@@ -5,13 +5,15 @@
 ```bash
 make up        # .env secrets, TLS certs, XNAT plugins, build, boot, bootstrap jobs, health check
 make seed      # 10 synthetic fake-PHI studies via the de-id gateway + 13 HL7 messages via Mirth
-make e2e       # end-to-end smoke test
+make e2e       # end-to-end smoke test (API checks, SSO, then the UI in headless Chromium)
+make ui-smoke  # only the browser pass; screenshots in artifacts/ui-smoke/
 make logs SERVICE=indexer
 make down      # stop (keeps data)    |    make clean   # stop and DELETE all volumes
 ```
 
 Requirements: Docker with ~12 GB RAM for the stack, `uv`, Node 22 (UI dev only), dcmtk
-`storescu` (e2e). XNAT's official image is amd64-only and runs under emulation on Apple
+`storescu` (e2e), and Chromium for the UI smoke test (`uv run --group e2e playwright install
+chromium`, or an installed Google Chrome). XNAT's official image is amd64-only and runs under emulation on Apple
 silicon (first boot ≈ 2–5 min).
 
 URLs (dev CA in `infra/nginx/certs/ca.crt`; trust it, or accept the warning):

@@ -32,6 +32,10 @@ dev = [
     "types-requests",
     "freezegun>=1.5",
 ]
+# Browser smoke test of the UI (scripts/ui_smoke.py); kept out of the unit/integration jobs.
+e2e = [
+    "playwright>=1.55",
+]
 
 # ---------------------------------------------------------------- ruff
 [tool.ruff]

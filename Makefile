@@ -81,6 +81,10 @@ test-in-docker: ## Run the integration suite inside docker-compose.test.yml
 e2e: ## End-to-end smoke test against a running stack (`make up` first)
 	@scripts/e2e.sh
 
+.PHONY: ui-smoke
+ui-smoke: ## Headless-browser smoke test of the UI against a running, seeded stack
+	uv run --frozen --group e2e python scripts/ui_smoke.py
+
 .PHONY: ui-test
 ui-test: ## Frontend type-check, lint and unit tests
 	cd services/ui && npm ci && npm run typecheck && npm run lint && npm test

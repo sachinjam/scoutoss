@@ -8,6 +8,7 @@ __pycache__/
 .coverage
 coverage*.xml
 htmlcov/
+artifacts/
 infra/nginx/certs/
 xnat/plugins/*.jar
 node_modules/
