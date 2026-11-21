@@ -52,10 +52,11 @@ resolver, which does not on macOS ("Safari Can't Find the Server"): add
    `/projects/<XNAT project>` groups and add users matching their XNAT project membership.
 4. Deploy XNAT 1.8+ (or point at an existing one) with the Container Service (Kubernetes
    backend) and OHIF plugins; run `scripts/bootstrap/xnat.py` against it.
-   For Keycloak sign-on into XNAT also install `openid-auth-plugin`, write the provider properties
-   as `xnat/xnat-start.sh` does, and run the access sync (`scoutoss-indexer xnat-access-sync`, see
-   the `xnat-access-sync` service in `docker-compose.yml`). The Helm chart does not deploy the
-   sync yet; run it as a separate Deployment from the indexer image.
+   For Keycloak sign-on into XNAT also install `openid-auth-plugin` and write the provider
+   properties as `xnat/xnat-start.sh` does. The chart deploys the access sync
+   (`xnatAccessSync.*` in `values.yaml`); it needs `KC_XNAT_SYNC_CLIENT_SECRET` and
+   `XNAT_ADMIN_PASSWORD` in the Secret. Set `xnatAccessSync.enabled=false` if XNAT does not use
+   Keycloak sign-on.
 5. Create the `scoutoss-secrets` Secret (keys listed in `helm/scoutoss/values.yaml`), e.g. via
    External Secrets from Vault. Generate `DEID_HMAC_SALT` (≥ 32 random bytes) and
    `DEID_VAULT_KEY` (`openssl rand -base64 32`) **once** and escrow them (see Backup).

@@ -1,0 +1,58 @@
+{{- if .Values.xnatAccessSync.enabled }}
+{{- $name := "xnat-access-sync" }}
+# Mirrors Keycloak groups /projects/<ID> into XNAT's read-only collaborator role for users who
+# sign in to XNAT through Keycloak, and re-warms XNAT for pipeline results after an XNAT restart.
+# It holds XNAT admin and Keycloak user-lookup credentials, so it gets only those two secrets
+# (no OpenSearch or database access) and accepts no inbound traffic.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: 1          # one writer; a second would only repeat the same idempotent calls
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sync
+          image: {{ include "scoutoss.image" (dict "root" . "name" "indexer") }}
+          args: ["scoutoss-indexer", "xnat-access-sync"]
+          env:
+            - { name: ENV, value: {{ .Values.global.env | quote }} }
+            - { name: LOG_LEVEL, value: {{ .Values.global.logLevel | quote }} }
+            - { name: KEYCLOAK_URL, value: {{ .Values.xnatAccessSync.keycloakUrl | quote }} }
+            - { name: KEYCLOAK_REALM, value: {{ .Values.xnatAccessSync.realm | quote }} }
+            - { name: KC_XNAT_SYNC_CLIENT_ID, value: {{ .Values.xnatAccessSync.clientId | quote }} }
+            - { name: XNAT_URL, value: {{ .Values.external.xnat.url | quote }} }
+            - { name: XNAT_ADMIN_USER, value: {{ .Values.xnatAccessSync.xnatAdminUser | quote }} }
+            - { name: ACCESS_SYNC_SECONDS, value: {{ .Values.xnatAccessSync.intervalSeconds | quote }} }
+            - { name: ACCESS_SYNC_HEARTBEAT, value: /tmp/xnat-access-sync.ok }
+            {{- range $k := list "KC_XNAT_SYNC_CLIENT_SECRET" "XNAT_ADMIN_PASSWORD" }}
+            {{- include "scoutoss.secretEnv" (dict "root" $ "key" $k) | nindent 12 }}
+            {{- end }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources: {{- toYaml .Values.xnatAccessSync.resources | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          # No HTTP port: the loop touches a heartbeat file after every successful cycle.
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os,sys,time;sys.exit(time.time()-os.path.getmtime('/tmp/xnat-access-sync.ok')>{{ .Values.xnatAccessSync.staleAfterSeconds }})"
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes: [{ name: tmp, emptyDir: { sizeLimit: 16Mi } }]
+{{- end }}

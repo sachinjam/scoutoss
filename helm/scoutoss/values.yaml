@@ -16,6 +16,7 @@ global:
 #       XNAT_INDEXER_PASSWORD XNAT_PIPELINE_PASSWORD XNAT_ARCHIVER_PASSWORD
 #       INDEXER_WEBHOOK_TOKEN MIRTH_DB_PASSWORD OPENSEARCH_PASSWORD
 #       AZURE_OPENAI_API_KEY (optional) LLM_API_KEY (optional)
+#       KC_XNAT_SYNC_CLIENT_SECRET XNAT_ADMIN_PASSWORD (only when xnatAccessSync.enabled)
 existingSecret: scoutoss-secrets
 
 hosts:
@@ -127,6 +128,23 @@ mirth:
   resources:
     requests: { cpu: 250m, memory: 768Mi }
     limits: { cpu: "2", memory: 2Gi }
+
+# Keycloak single sign-on into XNAT: mirrors Keycloak groups /projects/<XNAT project ID> into
+# XNAT's read-only collaborator role and keeps XNAT warm for pipeline results. Needs XNAT's
+# openid-auth-plugin, and the Keycloak client below with a service account that has the
+# realm-management roles view-users, query-users, query-groups and the kc-admin-api client scope
+# (see infra/keycloak/realm.json and docs/runbook.md).
+xnatAccessSync:
+  enabled: true
+  keycloakUrl: http://keycloak.auth.svc:8080   # base URL, without /realms/...
+  realm: scoutoss
+  clientId: scoutoss-xnat-sync
+  xnatAdminUser: admin
+  intervalSeconds: 10
+  staleAfterSeconds: 300   # restart the pod if no cycle has succeeded for this long
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { cpu: 250m, memory: 256Mi }
 
 monitoring:
   serviceMonitor: true
