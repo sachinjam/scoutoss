@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, type CopilotApi, type Pipeline, type QueryResult } from "../lib/api";
 import { config } from "../lib/config";
+import { viewerLink } from "../lib/viewer";
 import { VegaChart } from "./VegaChart";
 
 interface Turn {
@@ -163,7 +164,7 @@ export function CopilotPanel({ api, canWrite }: { api: CopilotApi; canWrite: boo
                           <td>{s.body_parts?.join(", ")}</td>
                           <td>{s.patient_age ?? "—"}</td>
                           <td>{s.patient_sex ?? "—"}</td>
-                          <td>{s.viewer_url ? <a href={s.viewer_url} target="_blank" rel="noreferrer">Open in OHIF</a> : "—"}</td>
+                          <td>{s.viewer_url ? <a href={viewerLink(s.viewer_url, config().viewerLanding)} target="_blank" rel="noreferrer">Open in OHIF</a> : "—"}</td>
                         </tr>
                       ))}
                     </tbody>

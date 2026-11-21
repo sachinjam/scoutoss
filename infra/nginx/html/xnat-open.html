@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Opening viewer…</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100vh;
+         background: #f6f7f9; color: #1c2430; }
+  main { max-width: 32rem; padding: 2rem; text-align: center; }
+  a { color: #1d4ed8; }
+  @media (prefers-color-scheme: dark) { body { background: #12161c; color: #e6e9ee; } a { color: #8ab4ff; } }
+</style>
+</head>
+<body>
+<main><p id="msg" role="status">Opening the viewer…</p></main>
+<script>
+/* ScoutOSS -> XNAT landing page, served on XNAT's own origin at /scoutoss/open#<path>.
+ *
+ * XNAT's OpenID plugin can sign a visitor in silently when they already have a Keycloak session,
+ * but afterwards XNAT sends them to its home page instead of the page they asked for. This page
+ * keeps the destination (in sessionStorage, never sent to a server), starts the silent sign-in
+ * when needed, and continues to the destination once XNAT has a session. The edge proxy sends
+ * the post-login home page back here while the short-lived "scoutoss_resume" cookie is set.
+ * Only same-origin paths are accepted, so this cannot be used as an open redirect.
+ */
+(function () {
+  var TARGET = "scoutoss_open_target", TRIED = "scoutoss_open_tried";
+  var msg = document.getElementById("msg");
+  function say(html) { msg.innerHTML = html; }
+  function clearState() {
+    sessionStorage.removeItem(TARGET); sessionStorage.removeItem(TRIED);
+    document.cookie = "scoutoss_resume=; Path=/; Max-Age=0; Secure; SameSite=Lax";
+  }
+  function safe(path) {
+    return typeof path === "string" && path.charAt(0) === "/" && path.charAt(1) !== "/" &&
+           path.indexOf("\\") === -1 && path.indexOf("/scoutoss/open") !== 0;
+  }
+  var fromHash = decodeURIComponent(location.hash.slice(1));
+  if (safe(fromHash)) { sessionStorage.setItem(TARGET, fromHash); sessionStorage.removeItem(TRIED); }
+  var target = sessionStorage.getItem(TARGET);
+  if (!safe(target)) { clearState(); location.replace("/"); return; }
+
+  function get(url) {
+    // no Accept header: several XNAT endpoints answer 406 to "application/json"
+    return fetch(url, { credentials: "same-origin", redirect: "manual", cache: "no-store" });
+  }
+  // A new account gets its project access from the access-sync service a few seconds after its
+  // first sign-in; wait for that instead of showing the viewer an empty study.
+  function waitForAccess(project, attemptsLeft) {
+    if (!project) return Promise.resolve(true);
+    return get("/data/projects/" + encodeURIComponent(project) + "?format=json").then(function (r) {
+      if (r.ok) return true;
+      if (attemptsLeft <= 0) return false;
+      say("Preparing your access to this project…");
+      return new Promise(function (res) { setTimeout(res, 2000); })
+        .then(function () { return waitForAccess(project, attemptsLeft - 1); });
+    });
+  }
+  // /data/auth is 200 for any signed-in user and 401 for a guest (the /xapi/users endpoints
+  // are admin-only on this site and answer 403 to ordinary users).
+  get("/data/auth").then(function (r) {
+    if (r.ok) {
+      var project = new URLSearchParams(target.split("?")[1] || "").get("projectId");
+      return waitForAccess(project, 15).then(function (granted) {
+        clearState();
+        if (granted) { location.replace(target); return; }
+        say("You are signed in, but you do not have access to this project in XNAT. " +
+            "Ask an administrator to add you to its group.");
+      });
+    }
+    if (sessionStorage.getItem(TRIED)) {
+      // the silent attempt did not sign us in (no Keycloak session): let the user sign in, then resume
+      document.cookie = "scoutoss_resume=1; Path=/; Max-Age=600; Secure; SameSite=Lax";
+      say('Please <a href="/app/template/Login.vm">sign in to XNAT</a> to open the viewer.');
+      return;
+    }
+    sessionStorage.setItem(TRIED, "1");
+    document.cookie = "scoutoss_resume=1; Path=/; Max-Age=120; Secure; SameSite=Lax";
+    location.replace("/openid-login?providerId=keycloak&prompt=none");
+  }).catch(function () {
+    say('Could not reach XNAT. <a href="' + location.pathname + '">Try again</a>.');
+  });
+})();
+</script>
+</body>
+</html>

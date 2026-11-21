@@ -126,14 +126,34 @@ server {
   server_name xnat.localhost;
   add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
   set $xnat http://xnat-web:8080;
+  proxy_set_header Host              $host:${HTTPS_PORT};
+  proxy_set_header X-Real-IP         $remote_addr;
+  proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_redirect http://$host:${HTTPS_PORT}/ https://$host:${HTTPS_PORT}/;
+  proxy_redirect http://xnat-web:8080/ https://$host:${HTTPS_PORT}/;
+
+  # Landing page for links from the ScoutOSS UI ("Open in OHIF"): signs the visitor in to XNAT
+  # through Keycloak when needed, then continues to the requested page (see xnat-open.html).
+  location = /scoutoss/open {
+    root /usr/share/nginx/scoutoss;
+    try_files /xnat-open.html =404;
+    default_type text/html;
+    add_header Cache-Control "no-store" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Content-Security-Policy "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'" always;
+  }
+  # After a sign-in XNAT goes to its home page. While the landing page's short-lived cookie is
+  # set, send the browser back there so it can continue to the page the user asked for.
+  location = /app/template/Index.vm {
+    if ($cookie_scoutoss_resume = "1") {
+      add_header Set-Cookie "scoutoss_resume=; Path=/; Max-Age=0; Secure; SameSite=Lax" always;
+      return 302 https://$host:${HTTPS_PORT}/scoutoss/open;
+    }
+    proxy_pass $xnat;
+  }
   location / {
     proxy_pass $xnat;
-    proxy_set_header Host              $host:${HTTPS_PORT};
-    proxy_set_header X-Real-IP         $remote_addr;
-    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto https;
-    proxy_redirect http://$host:${HTTPS_PORT}/ https://$host:${HTTPS_PORT}/;
-    proxy_redirect http://xnat-web:8080/ https://$host:${HTTPS_PORT}/;
   }
 }
 

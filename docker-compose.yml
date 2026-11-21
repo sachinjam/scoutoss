@@ -35,6 +35,7 @@ services:
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
     volumes:
       - ./infra/nginx/templates:/etc/nginx/templates:ro
+      - ./infra/nginx/html:/usr/share/nginx/scoutoss:ro
       - ./infra/nginx/certs:/etc/nginx/certs:ro
     labels: { scoutoss.service: proxy }
     healthcheck:
@@ -94,6 +95,9 @@ services:
       XNAT_HOME: /data/xnat/home
       XNAT_DB_PASSWORD: ${XNAT_DB_PASSWORD}
       XNAT_PUBLIC_URL: https://xnat.localhost:${HTTPS_PORT:-24443}
+      KC_XNAT_CLIENT_SECRET: ${KC_XNAT_CLIENT_SECRET}
+      KEYCLOAK_PUBLIC_ISSUER: https://auth.localhost:${HTTPS_PORT:-24443}/realms/scoutoss
+      KEYCLOAK_INTERNAL_ISSUER: http://keycloak:8080/realms/scoutoss
       TZ: Etc/UTC
     volumes:
       - ./xnat/xnat-start.sh:/usr/local/bin/xnat-start.sh:ro
@@ -201,6 +205,8 @@ services:
       KC_MIRTH_CLIENT_SECRET: ${KC_MIRTH_CLIENT_SECRET}
       KC_DASHBOARDS_CLIENT_SECRET: ${KC_DASHBOARDS_CLIENT_SECRET}
       KC_NOTEBOOKS_CLIENT_SECRET: ${KC_NOTEBOOKS_CLIENT_SECRET}
+      KC_XNAT_CLIENT_SECRET: ${KC_XNAT_CLIENT_SECRET}
+      KC_XNAT_SYNC_CLIENT_SECRET: ${KC_XNAT_SYNC_CLIENT_SECRET}
       DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD}
     volumes:
       - ./infra/keycloak/realm.json:/opt/keycloak/data/import/scoutoss-realm.json:ro
@@ -316,6 +322,33 @@ services:
       logstash: { condition: service_started }
 
   # ------------------------------------------------------------------ ScoutOSS services
+  # Mirrors Keycloak groups /projects/<ID> into XNAT's read-only collaborator role, so users who
+  # arrive in XNAT/OHIF through single sign-on can see exactly the projects the copilot shows them.
+  xnat-access-sync:
+    <<: *hardening
+    image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}
+    command: ["scoutoss-indexer", "xnat-access-sync"]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      <<: *python-env
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: scoutoss
+      KC_XNAT_SYNC_CLIENT_SECRET: ${KC_XNAT_SYNC_CLIENT_SECRET}
+      XNAT_URL: http://xnat-web:8080
+      XNAT_ADMIN_PASSWORD: ${XNAT_ADMIN_PASSWORD}
+      ACCESS_SYNC_SECONDS: "5"
+    labels: { scoutoss.service: xnat-access-sync }
+    depends_on:
+      keycloak: { condition: service_healthy }
+      xnat-setup: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys;sys.exit(time.time()-os.path.getmtime('/tmp/xnat-access-sync.ok')>120)"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+
   deid-gateway:
     <<: *hardening
     build: { context: ., dockerfile: services/indexer/Dockerfile }

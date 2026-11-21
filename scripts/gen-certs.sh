@@ -27,6 +27,10 @@ openssl x509 -req -in "$DIR/server.csr" -CA "$DIR/ca.crt" -CAkey "$DIR/ca.key" -
   -out "$DIR/server.crt" -days 825 -sha256 -extfile "$DIR/san.cnf" -extensions ext >/dev/null 2>&1
 cat "$DIR/server.crt" "$DIR/ca.crt" > "$DIR/fullchain.crt"
 chmod 644 "$DIR/server.crt" "$DIR/fullchain.crt" "$DIR/ca.crt"
-chmod 640 "$DIR/server.key"
+# The edge proxy runs as an unprivileged user (uid 101) that is neither owner nor group of this
+# bind-mounted file on Linux hosts, so the dev server key must be world-readable. It is a
+# throwaway self-signed key in a git-ignored directory; the CA key below stays owner-only.
+chmod 644 "$DIR/server.key"
+chmod 600 "$DIR/ca.key"
 rm -f "$DIR/server.csr" "$DIR/san.cnf"
 echo "dev certificates written to $DIR (trust $DIR/ca.crt to avoid browser warnings)"

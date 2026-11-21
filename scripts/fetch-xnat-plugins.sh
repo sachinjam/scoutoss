@@ -8,6 +8,7 @@ mkdir -p "$DEST"
 # name|url|sha256
 PLUGINS=(
   "container-service-3.9.0-fat.jar|https://github.com/NrgXnat/container-service/releases/download/3.9.0/container-service-3.9.0-fat.jar|809042a18dfea8383b7bd5f53b367eb8ea05c2a8c3f35b519841aa17b93cd207"
+  "openid-auth-plugin-1.6.0-xpl.jar|https://github.com/NrgXnat/openid-auth-plugin/releases/download/1.6.0/openid-auth-plugin-1.6.0-xpl.jar|3dfd7102504cad9c377617947510b071517009a92173700146b3bc9f6894cef5"
   "ohif-viewer-3.7.1-fat.jar|${OHIF_PLUGIN_URL:-https://bitbucket.org/icrimaginginformatics/ohif-viewer-xnat-plugin/downloads/ohif-viewer-3.7.1-fat.jar}|1b8b79554b96b92b995cdb5f8dffdf959c11a51f892fd391421584fe86f1986c"
 )
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }

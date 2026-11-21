@@ -1,4 +1,5 @@
-"""CLI: ``serve`` (API + worker), ``index-folder`` (one-shot bulk load), ``gateway``."""
+"""CLI: ``serve`` (API + worker), ``index-folder`` (one-shot bulk load), ``gateway``,
+``xnat-access-sync`` (Keycloak project groups -> XNAT project roles)."""
 
 from __future__ import annotations
 
@@ -22,7 +23,13 @@ def main(argv: list[str] | None = None) -> int:
     folder.add_argument("path", type=Path)
     folder.add_argument("--project", default=os.getenv("DEFAULT_PROJECT", "FOLDER"))
     sub.add_parser("gateway", help="run the DICOM de-identification gateway")
+    sub.add_parser("xnat-access-sync", help="mirror Keycloak project groups into XNAT roles")
     args = parser.parse_args(argv)
+
+    if args.cmd == "xnat-access-sync":
+        from scoutoss_indexer.xnat_access import main as access_main
+
+        return access_main()
 
     if args.cmd == "gateway":
         from scoutoss_indexer.gateway import main as gateway_main

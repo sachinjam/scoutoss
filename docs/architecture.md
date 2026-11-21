@@ -140,10 +140,10 @@ writes a `TOTALSEG` NIfTI resource per CT scan.
 
 | Boundary | Mechanism |
 |---|---|
-| Users | Keycloak OIDC (PKCE for the SPA, oauth2-proxy for Dashboards/Jaeger/Prometheus, OAuth for JupyterHub) |
+| Users | Keycloak OIDC (PKCE for the SPA, oauth2-proxy for Dashboards/Jaeger/Prometheus, OAuth for JupyterHub, `openid-auth-plugin` for XNAT/OHIF) |
 | Services | Keycloak client credentials (`copilot→indexer`, `mirth→indexer`), RS256 JWT with audience checks |
 | Roles | `viewer` (query), `researcher` (+ save/export/launch), `admin` (+ reindex, all projects), `service` |
-| Tenancy | XNAT project membership mirrored as Keycloak groups `/projects/<ID>`; every copilot search, stat, export and launch is filtered by the caller's projects |
+| Tenancy | Keycloak groups `/projects/<ID>` are the single source: every copilot search, stat, export and launch is filtered by them, and `xnat-access-sync` mirrors them into XNAT's read-only collaborator role for signed-on users |
 | Data | Only pseudonymized, date-shifted, cleaned data enters XNAT and OpenSearch; the re-id vault is AES-GCM encrypted and readable only by role `deid_svc` |
 | Network | Only nginx (443), the gateway (DICOM) and Mirth (MLLP) publish ports, on 127.0.0.1 in dev; XNAT's SCP accepts only AE `SCOUTGW`; Helm adds NetworkPolicies |
 

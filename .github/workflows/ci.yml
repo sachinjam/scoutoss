@@ -159,7 +159,10 @@ jobs:
           SCOUTOSS_ALLOW_MISSING_OHIF: "1"
         run: make up
       - name: seed + e2e smoke test
-        env: { COMPOSE_FILE: "docker-compose.yml:docker-compose.test.yml" }
+        env:
+          COMPOSE_FILE: docker-compose.yml:docker-compose.test.yml
+          # no OHIF jar on the runner: the viewer step checks the XNAT sign-on only
+          SCOUTOSS_ALLOW_MISSING_OHIF: "1"
         run: |
           make seed
           scripts/e2e.sh

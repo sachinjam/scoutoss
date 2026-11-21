@@ -10,6 +10,10 @@ Steps (each prints one JSON line; the first failure exits non-zero):
   ask         the three example questions each render an answer, counts and the query plan;
               charts are drawn; the cross-modal question finds >= 1 patient
   save        "Save Cohort" stores the cohort and shows the confirmation
+  viewer      "Open in OHIF" opens the study in XNAT's OHIF viewer with no second login
+              (Keycloak single sign-on into XNAT, account created on first visit, project
+              access granted by xnat-access-sync). When the OHIF plugin is not installed
+              (SCOUTOSS_ALLOW_MISSING_OHIF=1, as in CI) it checks the XNAT sign-in only.
   dashboards  the Dashboards tab loads OpenSearch Dashboards through oauth2-proxy (SSO)
   notebooks   JupyterHub login via Keycloak spawns JupyterLab
   page        no uncaught page errors and no 5xx responses from the edge, at any point
@@ -24,9 +28,11 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
@@ -162,6 +168,43 @@ def main() -> int:
         notice.wait_for()
         assert_clean("save")
         step("save", "Saved cohort" in notice.inner_text(), notice=notice.inner_text())
+
+        link = page.locator("article.turn").first.get_by_role("link", name="Open in OHIF").first
+        with context.expect_page() as opened:
+            link.click()
+        viewer = watch(opened.value)
+        current["page"] = viewer
+        need_ohif = os.environ.get("SCOUTOSS_ALLOW_MISSING_OHIF") != "1"
+        signed_in = canvases = 0
+        problem = ""
+        try:
+            # match on the path: the landing page's own URL carries "#/VIEWER/..." as its fragment
+            viewer.wait_for_url(
+                lambda url: urlsplit(url).path.startswith("/VIEWER"), timeout=120_000
+            )
+            viewer.wait_for_load_state("domcontentloaded")
+            signed_in = viewer.evaluate(
+                "() => fetch('/data/auth', {cache: 'no-store'}).then(r => r.status)"
+            )
+            if need_ohif:
+                viewer.locator("canvas").first.wait_for(timeout=120_000)
+            canvases = viewer.locator("canvas").count()
+        except PlaywrightError as exc:
+            problem = str(exc).splitlines()[0][:200]
+        # best effort: OHIF's WebGL canvases can stall a headless screenshot
+        with contextlib.suppress(PlaywrightError):
+            viewer.screenshot(path=OUT / "viewer.png", timeout=15_000)
+        assert_clean("viewer")
+        step(
+            "viewer",
+            signed_in == 200 and (canvases > 0 or not need_ohif),
+            xnat_auth=signed_in,
+            canvases=canvases,
+            url=viewer.url.split("?")[0],
+            problem=problem,
+        )
+        viewer.close()
+        current["page"] = page
 
         page.get_by_role("button", name="Dashboards").click()
         frame = page.frame_locator("iframe.dashboards")

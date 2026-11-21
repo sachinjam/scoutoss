@@ -27,7 +27,8 @@ role. Then ask:
 * *patients under 85 with lung cancer AND CT chest*
 * *of those, how many are female?*
 
-Every answer shows the generated query plan, Vega-Lite charts and OHIF links. From there you
+Every answer shows the generated query plan, Vega-Lite charts and OHIF links. "Open in OHIF"
+opens the study in XNAT's viewer without a second login (Keycloak single sign-on into XNAT). From there you
 can **Save Cohort**, **Export CSV** or **Run Pipeline on Cohort**.
 
 The OHIF plugin jar is not publicly downloadable from every network. Put it in
@@ -57,6 +58,7 @@ make helm-lint
 * [Architecture](docs/architecture.md): diagrams, data flows, security model
 * [Runbook](docs/runbook.md): operations, re-indexing, alerting, backup and restore, DR
 * [API](docs/api.md): copilot and indexer endpoints, schemas, metrics
+* [Scaling](docs/scaling.md): backlog for 100,000 cases (planned, not implemented)
 * [Compliance](docs/compliance.md): PHI data flow, de-identification spec, audit model, HIPAA/GDPR mapping
 
 ## License

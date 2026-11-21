@@ -26,7 +26,7 @@ URLs (dev CA in `infra/nginx/certs/ca.crt`; trust it, or accept the warning):
 | https://app.localhost:24443/jaeger | Jaeger (Keycloak SSO) |
 | https://app.localhost:24443/prometheus | Prometheus (Keycloak SSO) |
 | https://app.localhost:24443/notebooks | JupyterHub (Keycloak) |
-| https://xnat.localhost:24443 | XNAT + OHIF (admin / `XNAT_ADMIN_PASSWORD`) |
+| https://xnat.localhost:24443 | XNAT + OHIF (Keycloak sign-on for users; `admin` / `XNAT_ADMIN_PASSWORD` is a local account) |
 | https://auth.localhost:24443 | Keycloak (admin / `KEYCLOAK_ADMIN_PASSWORD`) |
 | `127.0.0.1:24112` AE `SCOUTGW` | DICOM C-STORE into the de-id gateway (called AE = project) |
 | `127.0.0.1:26661` | HL7 MLLP |
@@ -52,6 +52,10 @@ resolver, which does not on macOS ("Safari Can't Find the Server"): add
    `/projects/<XNAT project>` groups and add users matching their XNAT project membership.
 4. Deploy XNAT 1.8+ (or point at an existing one) with the Container Service (Kubernetes
    backend) and OHIF plugins; run `scripts/bootstrap/xnat.py` against it.
+   For Keycloak sign-on into XNAT also install `openid-auth-plugin`, write the provider properties
+   as `xnat/xnat-start.sh` does, and run the access sync (`scoutoss-indexer xnat-access-sync`, see
+   the `xnat-access-sync` service in `docker-compose.yml`). The Helm chart does not deploy the
+   sync yet; run it as a separate Deployment from the indexer image.
 5. Create the `scoutoss-secrets` Secret (keys listed in `helm/scoutoss/values.yaml`), e.g. via
    External Secrets from Vault. Generate `DEID_HMAC_SALT` (≥ 32 random bytes) and
    `DEID_VAULT_KEY` (`openssl rand -base64 32`) **once** and escrow them (see Backup).
@@ -83,6 +87,27 @@ repeats increment `attempts` on the same DLQ document.
 The gateway expedites archiving; if sessions sit in the prearchive, check
 `gateway_sessions_expedited_total{outcome}` and the prearchive page. XNAT's session rebuilder
 (1 min) archives them regardless.
+
+### XNAT single sign-on and project access
+XNAT signs users in through Keycloak (`openid-auth-plugin`, config written by `xnat/xnat-start.sh`
+to `$XNAT_HOME/config/auth/openid-provider.properties`). A visitor with a Keycloak session is
+signed in silently; their XNAT account (same username) is created on first visit. `admin` and the
+`scout_*` service accounts stay local XNAT accounts.
+
+* **Project access** comes from Keycloak groups `/projects/<XNAT project ID>`, mirrored by the
+  `xnat-access-sync` service into XNAT's read-only `collaborator` role every few seconds. It only
+  adds or removes collaborators that are Keycloak users; owners, members and local accounts are
+  never touched. To give someone access, add them to the group; do not add them in XNAT.
+* **"Open in OHIF" links** go to `https://<xnat>/scoutoss/open#<path>` (`infra/nginx/html/xnat-open.html`),
+  which signs in if needed and continues to the viewer, because XNAT itself goes to its home page
+  after a sign-in. Behind another proxy, serve that file at `/scoutoss/open` on XNAT's host and add
+  the `Index.vm` cookie redirect from `infra/nginx/templates/scoutoss.conf.template`, or set
+  `viewerLanding: false` in the UI's `config.js` to link straight to XNAT.
+* **Troubleshooting:** `xnat-access-sync` unhealthy means it cannot reach Keycloak or XNAT (its log
+  says which). A 401 from Keycloak's admin API means the `scoutoss-xnat-sync` client lost the
+  `kc-admin-api` client scope or its `realm-management` roles (`view-users`, `query-users`,
+  `query-groups`). "You do not have access to this project" on the landing page means the user is
+  not in the project's Keycloak group.
 
 ### HL7
 Mirth Administrator: `https://<mirth>:8443` (admin / `MIRTH_ADMIN_PASSWORD`). ACK `AE`

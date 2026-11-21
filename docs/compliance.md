@@ -102,7 +102,7 @@ the IdP; XNAT keeps its own access logs.
 
 | Requirement | HIPAA Security Rule | GDPR | ScoutOSS control |
 |---|---|---|---|
-| Access control, unique user IDs | 164.312(a)(1), (a)(2)(i) | Art. 32(1)(b) | Keycloak OIDC; RS256 JWT with audience checks on every API; roles viewer/researcher/admin |
+| Access control, unique user IDs | 164.312(a)(1), (a)(2)(i) | Art. 32(1)(b) | Keycloak OIDC; RS256 JWT with audience checks on every API; roles viewer/researcher/admin; XNAT/OHIF use the same Keycloak identity (one account per person, read-only project access) |
 | Minimum necessary / tenancy | 164.502(b), 164.514(d) | Art. 5(1)(c), 25 | project groups filter every query/export/launch; XNAT project RBAC; Dashboards DLS by project (prod) |
 | Audit controls | 164.312(b) | Art. 30, 5(2) | append-only `audit` index, 6-year retention, request logs with user pseudonym and trace id |
 | Integrity | 164.312(c)(1) | Art. 32(1)(b) | deterministic idempotent indexing; vault ciphertexts bound to their row (GCM AAD); pinned image versions |

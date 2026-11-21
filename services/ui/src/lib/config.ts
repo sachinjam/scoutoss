@@ -5,6 +5,8 @@ export interface ScoutConfig {
   apiBase: string;
   dashboardsPath: string;
   project: string;
+  /** Send viewer links through XNAT's /scoutoss/open landing page (Keycloak sign-on). */
+  viewerLanding: boolean;
 }
 
 declare global {
@@ -21,6 +23,7 @@ const DEFAULTS: ScoutConfig = {
   dashboardsPath:
     "/dashboards/app/dashboards#/view/scoutoss-overview?embed=true&_g=(time:(from:now-15y,to:now))",
   project: "SCOUT_DEMO",
+  viewerLanding: true,
 };
 
 export function config(): ScoutConfig {

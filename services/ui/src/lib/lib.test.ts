@@ -3,6 +3,22 @@ import { ApiError, CopilotApi } from "./api";
 import { config } from "./config";
 import { SseParser } from "./sse";
 import { newTraceparent, traceIdOf } from "./trace";
+import { viewerLink } from "./viewer";
+
+describe("viewerLink", () => {
+  const url = "https://xnat.localhost:24443/VIEWER/?subjectId=S1&projectId=P1&experimentId=E1";
+  it("routes through the XNAT landing page with the destination in the fragment", () => {
+    expect(viewerLink(url)).toBe(
+      "https://xnat.localhost:24443/scoutoss/open#/VIEWER/?subjectId=S1&projectId=P1&experimentId=E1",
+    );
+  });
+  it("can be switched off, keeps relative paths and refuses script URLs", () => {
+    expect(viewerLink(url, false)).toBe(url);
+    expect(viewerLink("/VIEWER/?x=1")).toBe("/VIEWER/?x=1");
+    expect(viewerLink("javascript:alert(1)")).toBe("about:blank");
+    expect(viewerLink("javascript:alert(1)", false)).toBe("about:blank");
+  });
+});
 
 describe("traceparent", () => {
   it("is a valid W3C header", () => {

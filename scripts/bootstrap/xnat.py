@@ -107,6 +107,8 @@ def configure_site(x: Xnat) -> None:
         # The stock site-wide script rewrites PatientID/PatientName to XNAT labels, which
         # would break the gateway's pseudonyms. De-id is done by the gateway + project script.
         "enableSitewideAnonymizationScript": False,
+        # local accounts (admin, service accounts) + Keycloak single sign-on (openid-auth-plugin)
+        "enabledProviders": ["localdb", "keycloak"],
     }
     x.call("POST", "/xapi/siteConfig", json=settings)
     log(JOB, "site configured", keys=len(settings))
@@ -224,6 +226,49 @@ def ensure_container_service(x: Xnat) -> list[str]:
     return wrappers
 
 
+def register_qc_datatype(x: Xnat, *, force: bool = False) -> None:
+    """Store (and remove) one QC assessor so XNAT registers the data type before pipelines run.
+
+    XNAT adds a row to ``xdat_meta_element`` the first time an item of a data type is stored.
+    When the first two QC assessors ever are finalised at the same moment (a pipeline launched
+    on a cohort), both try to add that row and one upload fails with ``duplicate key value
+    violates unique constraint "xdat_meta_element_u_1"``. Doing the first insert here, serially,
+    removes the race. The placeholder session has no scans, so the indexer ignores it.
+    """
+    existing = x.json(
+        "GET", "/data/experiments", params={"xsiType": "xnat:qcAssessmentData", "format": "json"}
+    )
+    if not force and int(existing["ResultSet"].get("totalRecords") or 0) > 0:
+        log(JOB, "QC data type already registered")
+        return
+    subject = f"/data/projects/{PROJECT}/subjects/scoutoss-typecheck"
+    session = f"{subject}/experiments/scoutoss-typecheck-ct"
+    ok = (200, 201)
+    x.call("PUT", subject, ok=ok)
+    x.call("PUT", session, params={"xsiType": "xnat:ctSessionData"}, ok=ok)
+    session_id = x.json("GET", session, params={"format": "json"})["items"][0]["data_fields"]["ID"]
+    # same document shape the QC pipeline writes (services/pipelines/qc/qc.py)
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<xnat:QCAssessment xmlns:xnat="http://nrg.wustl.edu/xnat" '
+        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+        f'label="scoutoss-typecheck-qc" project="{PROJECT}" type="ScoutOSS-QC">'
+        "<xnat:date>2000-01-01</xnat:date>"
+        f"<xnat:imageSession_ID>{session_id}</xnat:imageSession_ID>"
+        "</xnat:QCAssessment>"
+    )
+    x.call(
+        "PUT",
+        f"{session}/assessors/scoutoss-typecheck-qc",
+        params={"inbody": "true"},
+        content=xml,
+        headers={"Content-Type": "text/xml"},
+        ok=ok,
+    )
+    x.call("DELETE", subject, params={"removeFiles": "true"}, ok=(200, 204))
+    log(JOB, "QC data type registered")
+
+
 def main() -> None:
     wait_for(
         JOB,
@@ -241,6 +286,7 @@ def main() -> None:
     ensure_user(x, "scout_archiver", env("XNAT_ARCHIVER_PASSWORD"), "Members")
     if env("XNAT_SKIP_CONTAINER_SERVICE", "false") != "true":
         ensure_container_service(x)
+    register_qc_datatype(x)
     log(JOB, "XNAT bootstrap complete", project=PROJECT)
 
 
