@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import Any
 
 import httpx
 import pytest
 import respx
 
+from scoutoss_common.phi import redact_text
 from scoutoss_copilot.clients import (
     PipelineError,
     SchemaClient,
@@ -58,6 +60,26 @@ def test_follow_up_uses_memory_and_previous_cohort(make_copilot: Any) -> None:
     assert follow.cohort_count == 1 and follow.generated_query["base_cohort_id"] == first.cohort_id
     other_user = copilot.ask("of those, how many are female?", user="u_2", session_id="s")
     assert "base_cohort_id" not in other_user.generated_query  # memory is per user
+
+
+# The redactor masks the leading 8-digit run of this UUID ("[ID]-c448-..."). About 1 in 40
+# random cohort IDs look like this; sending real IDs to the LLM broke such follow-ups.
+DIGIT_RUN_ID = "58239610-c448-40b6-a50d-1554bb2bd596"
+
+
+def test_follow_up_survives_cohort_ids_the_redactor_would_mask(
+    make_copilot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert DIGIT_RUN_ID not in redact_text(json.dumps({"cohort_id": DIGIT_RUN_ID}))
+    real_uuid4 = uuid.uuid4
+    ids = iter([uuid.UUID(DIGIT_RUN_ID)])
+    monkeypatch.setattr(uuid, "uuid4", lambda: next(ids, None) or real_uuid4())
+    copilot = make_copilot(HeuristicPlanner())
+    first = copilot.ask("CT chest", user="u_1", session_id="s")
+    assert first.cohort_id == DIGIT_RUN_ID
+    follow = copilot.ask("of those, how many are female?", user="u_1", session_id="s")
+    assert follow.warnings == []
+    assert follow.cohort_count == 1 and follow.generated_query["base_cohort_id"] == DIGIT_RUN_ID
 
 
 def test_missing_previous_cohort_warns(make_copilot: Any) -> None:

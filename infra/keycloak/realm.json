@@ -270,6 +270,27 @@
   ],
   "users": [
     {
+      "username": "demo",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "User",
+      "email": "demo@scoutoss.local",
+      "credentials": [
+        {
+          "type": "password",
+          "secretData": "{\"value\": \"6uopMZLAQIKlQ6dVlHQnLrx+QjjpJQUOd8DJs351SJjmwcDAjjfyxHBcRIB8AEhhim/krm4Wmq0KVFw95o55Lg==\", \"salt\": \"NidmU9nBOZAq/Y4ND9yiCA==\", \"additionalParameters\": {}}",
+          "credentialData": "{\"hashIterations\": 210000, \"algorithm\": \"pbkdf2-sha512\", \"additionalParameters\": {}}"
+        }
+      ],
+      "realmRoles": [
+        "researcher"
+      ],
+      "groups": [
+        "/projects/SCOUT_DEMO"
+      ]
+    },
+    {
       "username": "researcher",
       "enabled": true,
       "emailVerified": true,

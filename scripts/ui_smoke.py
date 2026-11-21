@@ -6,7 +6,7 @@ catches what only shows up in the built bundle in a real browser (a render crash
 the page, a 502 in the SSO redirect chain, a hub that never starts).
 
 Steps (each prints one JSON line; the first failure exits non-zero):
-  login       app.localhost -> Keycloak login form -> back in the SPA as `researcher`
+  login       app.localhost -> Keycloak login form -> back in the SPA as `demo`
   ask         the three example questions each render an answer, counts and the query plan;
               charts are drawn; the cross-modal question finds >= 1 patient
   save        "Save Cohort" stores the cohort and shows the confirmation
@@ -32,10 +32,10 @@ from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from e2e import ENV, PORT, ROOT
+from e2e import PORT, ROOT
 
 APP = f"https://app.localhost:{PORT}"
-USER = "researcher"
+USER = "demo"  # dev-only login with the fixed password "demo" (infra/keycloak/realm.json)
 OUT = ROOT / "artifacts" / "ui-smoke"
 TIMEOUT_MS = 60_000
 
@@ -100,7 +100,7 @@ def launch(pw: Playwright) -> Browser:
 
 def keycloak_login(page: Page) -> None:
     page.fill("#username", USER)
-    page.fill("#password", ENV["DEMO_USER_PASSWORD"])
+    page.fill("#password", "demo")
     page.click("#kc-login")
 
 

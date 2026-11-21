@@ -116,7 +116,7 @@ jobs:
           user="$(docker image inspect scoutoss/${{ matrix.name }}:ci --format '{{.Config.User}}')"
           echo "user=$user"; test -n "$user" && test "$user" != "root" && test "$user" != "0"
       - name: trivy (fail on fixable HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: scoutoss/${{ matrix.name }}:ci
           severity: HIGH,CRITICAL
@@ -129,7 +129,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: trivy config scan (Dockerfiles, compose, Helm)
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           scan-type: config
           scan-ref: .

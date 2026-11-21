@@ -19,8 +19,9 @@ make seed    # 10 synthetic fake-PHI studies (7 patients) + 13 HL7 messages
 make e2e     # C-STORE → XNAT → searchable < 60 s → copilot → pipeline → assessor → audit → SSO → UI in a browser
 ```
 
-Open https://app.localhost:24443 and sign in as `researcher`; the password is
-`DEMO_USER_PASSWORD` in `.env`. Then ask:
+Open https://app.localhost:24443 in Chrome or Firefox (Safari needs an `/etc/hosts` entry, see the
+[runbook](docs/runbook.md)) and sign in as `demo` / `demo`, a dev-only login with the researcher
+role. Then ask:
 
 * *how many CT studies*
 * *patients under 85 with lung cancer AND CT chest*

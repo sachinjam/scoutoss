@@ -67,7 +67,10 @@ def assessor_xml(
     today: str,
 ) -> str:
     """xnat:qcAssessmentData (QCAssessment): type is an attribute, per-scan statistics go in
-    scanStatistics (xnat:statisticsData), the overall rating in a custom field."""
+    scanStatistics (xnat:statisticsData), the overall rating and per-scan summary as JSON in the
+    standard note. Custom ``xnat:fields`` are avoided on purpose: when two assessors are finalised
+    at the same moment on a freshly started XNAT, its XML reader intermittently rejects
+    ``fields/field`` ("Invalid XML 'xnat:experimentData_field:fields/field'") and the upload fails."""
     scans = "".join(
         f"<xnat:scan id={quoteattr(scan)}>"
         f'<xnat:scanStatistics xsi:type="xnat:statisticsData">'
@@ -78,8 +81,12 @@ def assessor_xml(
     )
     summary = json.dumps(
         {
-            s: {k: v for k, v in r.items() if k in ("instances", "rows", "cols", "status")}
-            for s, r in results.items()
+            "rating": overall,
+            "scans": len(results),
+            "per_scan": {
+                s: {k: v for k, v in r.items() if k in ("instances", "rows", "cols", "status")}
+                for s, r in results.items()
+            },
         }
     )
     return (
@@ -89,8 +96,6 @@ def assessor_xml(
         f'ID={quoteattr(label)} label={quoteattr(label)} project={quoteattr(project)} type="ScoutOSS-QC">'
         f"<xnat:date>{today}</xnat:date>"
         f"<xnat:note>{escape(summary)[:1000]}</xnat:note>"
-        f'<xnat:fields><xnat:field name="rating">{overall}</xnat:field>'
-        f'<xnat:field name="scans">{len(results)}</xnat:field></xnat:fields>'
         f"<xnat:imageSession_ID>{escape(session_id)}</xnat:imageSession_ID>"
         f"<xnat:scans>{scans}</xnat:scans>"
         "</xnat:QCAssessment>\n"

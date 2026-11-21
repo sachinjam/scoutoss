@@ -3,6 +3,11 @@
 The LLM never sees a document. It sees field names, field descriptions, a handful of
 de-identified example *values* for low-cardinality fields (modalities, body parts, site
 codes...), previous plans in this session and the redacted question.
+
+Earlier cohorts are referred to as ``C1``, ``C2``... (their position in the session history),
+never by their database ID: random UUIDs regularly contain digit runs that the PHI redactor
+masks, which silently broke "of those..." follow-ups, and the LLM has no use for real IDs.
+:func:`resolve_cohort_ref` maps a reference in the returned plan back to the cohort ID.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ Plan format:
   "combine": "intersect" | "union",      // how step results combine on patient_pseudonym
   "subject": "patients" | "studies",     // what the user is counting
   "charts": ["modality"|"sex"|"age"|"body_part"|"year"|"diagnosis"|"manufacturer"],
-  "base_cohort_id": null | "<id of a previous cohort when the user refers to 'those'>",
+  "base_cohort_id": null | "<cohort reference of an earlier answer, e.g. \"C1\", when the user refers to 'those'>",
   "explanation": "<one sentence>"}}
 
 Rules:
@@ -151,10 +156,32 @@ def build_messages(
     messages = [
         Message("system", SYSTEM_TEMPLATE.format(schema=render_schema(schema), examples=examples))
     ]
-    for turn in history or []:
+    turns = history or []
+    refs = {turn["cohort_id"]: ref for ref, turn in _cohort_refs(turns)}
+    for turn in turns:
+        plan = dict(turn["plan"])
+        if plan.get("base_cohort_id") is not None:
+            # a plan stored after resolution holds a real ID: show its reference, or drop it
+            plan["base_cohort_id"] = refs.get(plan["base_cohort_id"])
         messages.append(Message("user", f"QUESTION: {turn['question']}"))
         messages.append(
-            Message("assistant", json.dumps({**turn["plan"], "cohort_id": turn.get("cohort_id")}))
+            Message("assistant", json.dumps({**plan, "cohort_id": refs.get(turn.get("cohort_id"))}))
         )
     messages.append(Message("user", f"QUESTION: {question}"))
     return messages
+
+
+def _cohort_refs(history: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
+    return [(f"C{n}", turn) for n, turn in enumerate(history, start=1) if turn.get("cohort_id")]
+
+
+def resolve_cohort_ref(ref: str | None, history: list[dict[str, Any]]) -> str | None:
+    """Map a ``C<n>`` reference from the LLM back to the cohort ID it stands for.
+
+    Anything else is returned unchanged, so an unknown reference still fails the
+    (user-scoped) cohort lookup and produces the usual "not found" warning.
+    """
+    if ref is None:
+        return None
+    by_ref = {name: turn["cohort_id"] for name, turn in _cohort_refs(history)}
+    return str(by_ref.get(ref.strip().upper(), ref))

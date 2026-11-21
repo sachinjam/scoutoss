@@ -17,7 +17,7 @@ from scoutoss_copilot.cohorts import CohortRepo, ConversationMemory, new_cohort
 from scoutoss_copilot.executor import CohortResult, Executor
 from scoutoss_copilot.llm import LLMProvider, Message, RedactingLLM
 from scoutoss_copilot.plan import PlanValidationError, QueryPlan, validate_plan
-from scoutoss_copilot.prompt import allow_terms, build_messages
+from scoutoss_copilot.prompt import allow_terms, build_messages, resolve_cohort_ref
 
 log = structlog.get_logger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -107,7 +107,9 @@ class Copilot:
         messages = build_messages(question, schema, history)
         with tracer.start_as_current_span("copilot.llm", attributes={"provider": self.provider}):
             raw = self.llm.complete(messages)
-        return validate_plan(raw, max_rows=self.max_rows), messages
+        plan = validate_plan(raw, max_rows=self.max_rows)
+        plan.base_cohort_id = resolve_cohort_ref(plan.base_cohort_id, history)
+        return plan, messages
 
     def ask(
         self,

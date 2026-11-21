@@ -31,8 +31,11 @@ URLs (dev CA in `infra/nginx/certs/ca.crt`; trust it, or accept the warning):
 | `127.0.0.1:24112` AE `SCOUTGW` | DICOM C-STORE into the de-id gateway (called AE = project) |
 | `127.0.0.1:26661` | HL7 MLLP |
 
-Demo users: `researcher`, `viewer`, `scoutadmin` — password `DEMO_USER_PASSWORD` in `.env`.
-Browsers resolve `*.localhost` natively; for other clients add
+Demo users: `demo` / `demo` (researcher role; a fixed, publicly known password, imported as a hash
+because it does not meet the realm's password policy), and `researcher`, `viewer`, `scoutadmin` with
+the generated `DEMO_USER_PASSWORD` in `.env`.
+Chrome and Firefox resolve `*.localhost` themselves. Safari and other clients use the system
+resolver, which does not on macOS ("Safari Can't Find the Server"): add
 `127.0.0.1 app.localhost xnat.localhost auth.localhost` to `/etc/hosts`.
 
 ## First install (production, Helm)
@@ -43,7 +46,9 @@ Browsers resolve `*.localhost` natively; for other clients add
    `dicom_*`, `clinical_events`, `indexer_dlq`; `create_doc` only on `audit`), `scoutoss_reader`
    (read-only, used by copilot and notebooks); document-level security on `project` mapped from
    the Keycloak `groups` claim for Dashboards tenants.
-3. Import `infra/keycloak/realm.json` (replace hostnames; keep secrets in the IdP), create
+3. Import `infra/keycloak/realm.json` (replace hostnames; keep secrets in the IdP; **delete the demo
+   users `demo`, `researcher`, `viewer` and `scoutadmin` from the file first** — `demo` has a publicly
+   known password), create
    `/projects/<XNAT project>` groups and add users matching their XNAT project membership.
 4. Deploy XNAT 1.8+ (or point at an existing one) with the Container Service (Kubernetes
    backend) and OHIF plugins; run `scripts/bootstrap/xnat.py` against it.
