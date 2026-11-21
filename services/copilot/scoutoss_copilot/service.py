@@ -14,7 +14,7 @@ from prometheus_client import Counter
 from scoutoss_common.phi import redact_text
 from scoutoss_copilot.charts import choose_charts
 from scoutoss_copilot.cohorts import CohortRepo, ConversationMemory, new_cohort
-from scoutoss_copilot.executor import CohortResult, Executor
+from scoutoss_copilot.executor import MAX_MEMBERS, CohortResult, Executor
 from scoutoss_copilot.llm import LLMProvider, Message, RedactingLLM
 from scoutoss_copilot.plan import PlanValidationError, QueryPlan, validate_plan
 from scoutoss_copilot.prompt import allow_terms, build_messages, resolve_cohort_ref
@@ -78,7 +78,7 @@ def compose_answer(plan: QueryPlan, result: CohortResult) -> str:
     if s.get("diagnosis"):
         parts.append(f"Diagnoses: {_fmt_breakdown(s['diagnosis'])}.")
     if result.truncated:
-        parts.append("Results were capped at 10,000 rows; counts may be incomplete.")
+        parts.append(f"Results were capped at {MAX_MEMBERS:,} rows; counts may be incomplete.")
     return " ".join([text, *parts])
 
 
@@ -167,7 +167,7 @@ class Copilot:
             question_hash=hashlib.sha256(clean_question.encode()).hexdigest()[:12],
         )
         if result.truncated:
-            warnings.append("One or more steps matched more than 10,000 rows.")
+            warnings.append(f"One or more steps matched more than {MAX_MEMBERS:,} rows.")
         return Answer(
             answer_text=compose_answer(plan, result),
             cohort_count=result.patient_count,

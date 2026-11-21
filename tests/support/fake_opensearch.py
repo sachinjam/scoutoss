@@ -126,6 +126,35 @@ def matches(doc: dict[str, Any], query: dict[str, Any] | None) -> bool:
     raise ValueError(f"FakeOpenSearch: unsupported query {kind}")
 
 
+def _sorted(
+    hits: list[dict[str, Any]], sort: list[Any] | None, search_after: list[Any] | None
+) -> list[dict[str, Any]]:
+    """Order ``hits`` like OpenSearch does for ``sort`` (missing values last), attach each hit's
+    ``sort`` values and drop everything up to ``search_after``."""
+    if not sort:
+        return hits
+    keys: list[tuple[str, bool]] = []
+    for spec in sort:
+        if isinstance(spec, str):
+            keys.append((spec, False))
+        else:
+            field, how = next(iter(spec.items()))
+            order = how if isinstance(how, str) else how.get("order", "asc")
+            keys.append((field, order == "desc"))
+    for hit in hits:
+        hit["sort"] = [_get(hit["_source"], field) for field, _ in keys]
+    for position in range(len(keys) - 1, -1, -1):  # stable sort, last key first
+        desc = keys[position][1]
+        present = [h for h in hits if h["sort"][position] is not None]
+        missing = [h for h in hits if h["sort"][position] is None]
+        present.sort(key=lambda h, i=position: h["sort"][i], reverse=desc)
+        hits = present + missing
+    if search_after is not None:
+        marks = [h["sort"] for h in hits]
+        hits = hits[marks.index(search_after) + 1 :] if search_after in marks else []
+    return hits
+
+
 def _aggregate(docs: list[dict[str, Any]], aggs: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for name, spec in aggs.items():
@@ -357,6 +386,7 @@ class FakeOpenSearch:
         total = len(hits)
         sources = [h["_source"] for h in hits]
         limit = int(size if size is not None else body.get("size", 10))
+        hits = _sorted(hits, body.get("sort"), body.get("search_after"))
         resp: dict[str, Any] = {
             "took": 1,
             "timed_out": False,
@@ -385,6 +415,14 @@ class FakeOpenSearch:
         for sid in (body or {}).get("scroll_id", []):
             self._scrolls.pop(sid, None)
         return {}
+
+    def delete_by_query(
+        self, index: Any = None, body: dict[str, Any] | None = None, **_: Any
+    ) -> dict[str, Any]:
+        hits = self._select(index, body)
+        for hit in hits:
+            self.data[hit["_index"]].pop(hit["_id"], None)
+        return {"deleted": len(hits)}
 
     def count(
         self, index: Any = None, body: dict[str, Any] | None = None, **_: Any

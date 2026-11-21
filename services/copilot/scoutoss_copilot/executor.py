@@ -1,9 +1,15 @@
 """Execute a validated plan against OpenSearch and compute cohort statistics.
 
-Each step is a plain ``_search`` with a 5 s server-side timeout, a 5 s client timeout,
-``_source`` restricted to non-identifying fields and at most 10 000 hits. Step results
-are combined on ``patient_pseudonym``; cohort statistics are then aggregated over the
-cohort's studies with one more read-only search.
+Each step is a read-only ``_search`` with a 5 s server-side timeout, a 5 s client timeout and
+``_source`` restricted to non-identifying fields. One request returns at most ``PAGE_SIZE``
+rows; a step that matches more is paged with ``search_after`` on a unique key until every row
+is read or ``MAX_MEMBERS`` rows have been collected (the result is then flagged ``truncated``).
+Step results are combined on ``patient_pseudonym``; cohort statistics are then aggregated over
+the cohort's studies with one more read-only search.
+
+``MAX_MEMBERS`` exists because cohorts are passed back to OpenSearch as ``terms`` filters, which
+OpenSearch limits to 65,536 values. Beyond that size the join has to move into aggregations
+(see docs/scaling.md).
 """
 
 from __future__ import annotations
@@ -14,7 +20,13 @@ from typing import Any, Protocol
 import structlog
 from opentelemetry import trace
 
-from scoutoss_common.catalog import CLINICAL_INDEX, PATIENTS_INDEX, PROJECT_FIELD, STUDIES_INDEX
+from scoutoss_common.catalog import (
+    CLINICAL_INDEX,
+    PATIENTS_INDEX,
+    PROJECT_FIELD,
+    SERIES_INDEX,
+    STUDIES_INDEX,
+)
 from scoutoss_copilot.plan import MAX_ROWS, QueryPlan
 
 log = structlog.get_logger(__name__)
@@ -38,6 +50,17 @@ STUDY_FIELDS = [
 ]
 
 
+PAGE_SIZE = 5_000  # rows per request; must stay <= index.max_result_window (10,000)
+MAX_MEMBERS = 50_000  # rows collected per step / ids per terms filter (OpenSearch allows 65,536)
+# A unique keyword per index, used as the search_after sort key.
+UNIQUE_KEY = {
+    STUDIES_INDEX: "study_uid",
+    SERIES_INDEX: "series_uid",
+    PATIENTS_INDEX: "patient_pseudonym",
+    CLINICAL_INDEX: "event_id",
+}
+
+
 class SearchClient(Protocol):
     def search(self, *args: Any, **kwargs: Any) -> Any: ...
 
@@ -49,11 +72,12 @@ class ExecutionError(RuntimeError):
 @dataclass
 class StepResult:
     index: str
-    total: int
+    total: int  # rows matching the step's query
     pseudonyms: set[str]
     study_uids: set[str]
     executed: dict[str, Any]
     aggregations: dict[str, Any] | None = None
+    rows: int = 0  # rows actually read (all pages); less than ``total`` means truncated
 
 
 @dataclass
@@ -72,11 +96,19 @@ class CohortResult:
 
 class Executor:
     def __init__(
-        self, client: SearchClient, *, timeout: float = 5.0, max_rows: int = MAX_ROWS
+        self,
+        client: SearchClient,
+        *,
+        timeout: float = 5.0,
+        max_rows: int = MAX_ROWS,
+        max_members: int = MAX_MEMBERS,
+        page_size: int = PAGE_SIZE,
     ) -> None:
         self.client = client
         self.timeout = timeout
-        self.max_rows = max_rows
+        self.max_rows = max_rows  # largest ``size`` a plan step may ask for
+        self.max_members = max_members  # rows read per step across all pages
+        self.page_size = page_size  # rows per request
 
     def _search(self, index: str, body: dict[str, Any]) -> dict[str, Any]:
         body = {**body, "timeout": f"{int(self.timeout * 1000)}ms", "track_total_hits": True}
@@ -113,24 +145,47 @@ class Executor:
                 "bool": {
                     "filter": [
                         query,
-                        {"terms": {"patient_pseudonym": sorted(restrict)[: self.max_rows]}},
+                        {"terms": {"patient_pseudonym": sorted(restrict)[: self.max_members]}},
                     ]
                 }
             }
-        size = min(step.size, self.max_rows)
+        # a plan's ``size`` only says "rows wanted" (0 = aggregations only); every matching row
+        # is read, PAGE_SIZE at a time, so the model cannot shrink or bloat the page size
+        size = self.page_size if step.size else 0
         source = ["patient_pseudonym"] + (["study_uid"] if step.index == STUDIES_INDEX else [])
-        body: dict[str, Any] = {"query": query, "size": size, "_source": source}
+        body: dict[str, Any] = {
+            "query": query,
+            "size": size,
+            "_source": source,
+            "sort": [{UNIQUE_KEY[step.index]: "asc"}],
+        }
         if step.aggs:
             body["aggs"] = step.aggs
         with tracer.start_as_current_span(
             "copilot.search", attributes={"index": step.index, "size": size}
-        ):
+        ) as span:
             resp = self._search(step.index, body)
-        hits = resp.get("hits", {}).get("hits", [])
-        total = resp.get("hits", {}).get("total", {})
+            hits = list(resp.get("hits", {}).get("hits", []))
+            total_obj = resp.get("hits", {}).get("total", {})
+            total = int(
+                total_obj.get("value", len(hits)) if isinstance(total_obj, dict) else total_obj
+            )
+            # a plan step with size 0 only wants its aggregations
+            page = hits
+            while size and len(page) == size and len(hits) < min(total, self.max_members):
+                more = self._search(
+                    step.index,
+                    {k: v for k, v in body.items() if k != "aggs"}
+                    | {"search_after": page[-1]["sort"]},
+                )
+                page = more.get("hits", {}).get("hits", [])
+                hits.extend(page)
+            hits = hits[: self.max_members]
+            span.set_attribute("rows", len(hits))
         return StepResult(
             index=step.index,
-            total=int(total.get("value", len(hits)) if isinstance(total, dict) else total),
+            total=total,
+            rows=len(hits),
             pseudonyms={
                 h["_source"]["patient_pseudonym"]
                 for h in hits
@@ -156,7 +211,7 @@ class Executor:
         if base_cohort is not None:
             members &= base_cohort
         study_steps = [s for s in steps if s.index == STUDIES_INDEX]
-        truncated = any(s.total > self.max_rows for s in steps)
+        truncated = any(plan.steps[i].size and s.rows < s.total for i, s in enumerate(steps))
         result = CohortResult(
             pseudonyms=sorted(members), study_uids=[], steps=steps, truncated=truncated
         )
@@ -177,10 +232,10 @@ class Executor:
             result.stats = empty_stats()
             return
         filters: list[dict[str, Any]] = [
-            {"terms": {"patient_pseudonym": result.pseudonyms[: self.max_rows]}}
+            {"terms": {"patient_pseudonym": result.pseudonyms[: self.max_members]}}
         ]
         if restrict_studies is not None:
-            filters.append({"terms": {"study_uid": sorted(restrict_studies)[: self.max_rows]}})
+            filters.append({"terms": {"study_uid": sorted(restrict_studies)[: self.max_members]}})
         if projects is not None:
             filters.append({"terms": {"project": sorted(projects)}})
         body = {
@@ -240,7 +295,7 @@ class Executor:
                     "size": 0,
                     "query": self.scoped(
                         CLINICAL_INDEX,
-                        {"terms": {"patient_pseudonym": pseudonyms[: self.max_rows]}},
+                        {"terms": {"patient_pseudonym": pseudonyms[: self.max_members]}},
                         projects,
                     ),
                     "aggs": {
@@ -280,7 +335,37 @@ def empty_stats() -> dict[str, Any]:
 
 def cohort_members_query(pseudonyms: list[str]) -> dict[str, Any]:
     """Read-only query reproducing a saved cohort (for exports and pipeline launches)."""
-    return {"terms": {"patient_pseudonym": pseudonyms[:MAX_ROWS]}}
+    return {"terms": {"patient_pseudonym": pseudonyms[:MAX_MEMBERS]}}
 
 
-__all__ = ["PATIENTS_INDEX", "CohortResult", "ExecutionError", "Executor", "StepResult"]
+def paged_hits(
+    client: SearchClient,
+    index: str,
+    body: dict[str, Any],
+    *,
+    limit: int = MAX_MEMBERS,
+    timeout: float = 10.0,
+) -> list[dict[str, Any]]:
+    """Every ``_source`` matching ``body`` (up to ``limit``), read ``PAGE_SIZE`` rows at a time
+    with ``search_after``. Used for exports and pipeline launches, which need whole cohorts."""
+    page_body = {**body, "size": PAGE_SIZE, "sort": [{UNIQUE_KEY[index]: "asc"}]}
+    out: list[dict[str, Any]] = []
+    while len(out) < limit:
+        resp = client.search(index=index, body=page_body, request_timeout=timeout)
+        page = resp.get("hits", {}).get("hits", [])
+        out.extend(h["_source"] for h in page)
+        if len(page) < PAGE_SIZE:
+            break
+        page_body = {**page_body, "search_after": page[-1]["sort"]}
+    return out[:limit]
+
+
+__all__ = [
+    "MAX_MEMBERS",
+    "PATIENTS_INDEX",
+    "CohortResult",
+    "ExecutionError",
+    "Executor",
+    "StepResult",
+    "paged_hits",
+]

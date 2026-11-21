@@ -81,6 +81,14 @@ test-in-docker: ## Run the integration suite inside docker-compose.test.yml
 e2e: ## End-to-end smoke test against a running stack (`make up` first)
 	@scripts/e2e.sh
 
+.PHONY: loadtest
+loadtest: ## Scale test: index STUDIES synthetic studies (default 10000), check copilot answers and speed
+	$(PY) python scripts/loadtest.py --studies $(or $(STUDIES),10000)
+
+.PHONY: loadtest-clean
+loadtest-clean: ## Remove the synthetic load-test documents from the indices
+	$(COMPOSE) exec -T indexer scoutoss-indexer loadtest --purge
+
 .PHONY: ui-smoke
 ui-smoke: ## Headless-browser smoke test of the UI against a running, seeded stack
 	uv run --frozen --group e2e python scripts/ui_smoke.py

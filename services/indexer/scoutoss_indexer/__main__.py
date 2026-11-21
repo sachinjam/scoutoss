@@ -1,5 +1,6 @@
 """CLI: ``serve`` (API + worker), ``index-folder`` (one-shot bulk load), ``gateway``,
-``xnat-access-sync`` (Keycloak project groups -> XNAT project roles)."""
+``xnat-access-sync`` (Keycloak project groups -> XNAT project roles), ``loadtest`` (synthetic
+index-only data for scale testing)."""
 
 from __future__ import annotations
 
@@ -24,6 +25,11 @@ def main(argv: list[str] | None = None) -> int:
     folder.add_argument("--project", default=os.getenv("DEFAULT_PROJECT", "FOLDER"))
     sub.add_parser("gateway", help="run the DICOM de-identification gateway")
     sub.add_parser("xnat-access-sync", help="mirror Keycloak project groups into XNAT roles")
+    loadtest = sub.add_parser("loadtest", help="index synthetic studies for scale testing")
+    loadtest.add_argument("--studies", type=int, default=10_000)
+    loadtest.add_argument("--project", default="LOADTEST")
+    loadtest.add_argument("--seed", type=int, default=7)
+    loadtest.add_argument("--purge", action="store_true", help="remove the project's load data")
     args = parser.parse_args(argv)
 
     if args.cmd == "xnat-access-sync":
@@ -57,6 +63,15 @@ def main(argv: list[str] | None = None) -> int:
     settings = get_settings()
     store = build_store(settings)
     store.ensure_indices()
+    if args.cmd == "loadtest":
+        from scoutoss_indexer import loadgen
+
+        if args.purge:
+            print(json.dumps({"purged": loadgen.purge(store.client, args.project)}))
+        else:
+            stats = loadgen.load(store, args.studies, project=args.project, seed=args.seed)
+            print(json.dumps(stats.as_dict()))
+        return 0
     pipeline = Pipeline(
         store, salt=settings.salt_bytes(), vault=build_vault(settings), default_project=args.project
     )

@@ -23,7 +23,7 @@ from scoutoss_common.catalog import STUDIES_INDEX
 from scoutoss_common.web import client_ip, install_observability
 from scoutoss_copilot import SERVICE_NAME
 from scoutoss_copilot.clients import PipelineError, XnatPipelines
-from scoutoss_copilot.executor import ExecutionError
+from scoutoss_copilot.executor import MAX_MEMBERS, ExecutionError, paged_hits
 from scoutoss_copilot.llm import LLMError, PHILeakError
 from scoutoss_copilot.plan import PlanValidationError
 from scoutoss_copilot.service import Copilot
@@ -386,19 +386,20 @@ def create_app(deps: CopilotDeps | None = None, *, build: bool = True) -> FastAP
 def _cohort_studies(
     d: CopilotDeps, members: list[str], study_uids: list[str], principal: Principal
 ) -> list[dict[str, Any]]:
-    filters: list[dict[str, Any]] = [{"terms": {"patient_pseudonym": members[:10_000]}}]
+    filters: list[dict[str, Any]] = [{"terms": {"patient_pseudonym": members[:MAX_MEMBERS]}}]
     if study_uids:
-        filters.append({"terms": {"study_uid": study_uids[:10_000]}})
+        filters.append({"terms": {"study_uid": study_uids[:MAX_MEMBERS]}})
     scope = principal.project_scope()
     if scope is not None:  # tenancy is re-checked at export/launch time, not only at query time
         filters.append({"terms": {"project": sorted(scope)}})
     if not members:
         return []
-    resp = d.search.search(
-        index=STUDIES_INDEX,
-        body={
+    # whole cohorts are needed here (CSV export, pipeline launch): page past the 10,000-row window
+    return paged_hits(
+        d.search,
+        STUDIES_INDEX,
+        {
             "query": {"bool": {"filter": filters}},
-            "size": 10_000,
             "_source": [
                 "patient_pseudonym",
                 "study_uid",
@@ -411,6 +412,4 @@ def _cohort_studies(
                 "xnat_experiment_id",
             ],
         },
-        request_timeout=10,
     )
-    return [h["_source"] for h in resp.get("hits", {}).get("hits", [])]

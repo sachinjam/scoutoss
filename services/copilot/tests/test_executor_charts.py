@@ -58,14 +58,49 @@ def test_empty_result_and_age_cap(populated_os: FakeOpenSearch) -> None:
     assert old.pseudonyms == ["SPC"] and old.stats["age"] == {"90": 1}
 
 
+ALL_STUDIES = {"steps": [{"index": "dicom_studies", "query": {"match_all": {}}}]}
+
+
+def test_steps_are_paged_past_one_request(populated_os: FakeOpenSearch) -> None:
+    """A step matching more rows than one request returns is read completely, page by page."""
+    one_page = Executor(populated_os).execute(validate_plan(ALL_STUDIES))
+    populated_os.calls.clear()
+    paged = Executor(populated_os, page_size=2).execute(validate_plan(ALL_STUDIES))
+    assert paged.truncated is False
+    assert paged.pseudonyms == one_page.pseudonyms and paged.study_uids == one_page.study_uids
+    assert paged.stats["studies"] == one_page.stats["studies"] == 6
+    step = paged.steps[0]
+    assert step.rows == step.total == 6
+    searches = [c[1]["body"] for c in populated_os.calls if c[1]["index"] == "dicom_studies"]
+    pages = [b for b in searches if b.get("sort") == [{"study_uid": "asc"}]]
+    # 6 rows in pages of 2: three requests, and no fourth because the total is already known
+    assert len(pages) == 3 and "search_after" not in pages[0]
+    assert all("search_after" in b and "aggs" not in b for b in pages[1:])
+    # the plan's own size never becomes the page size
+    tiny = {"steps": [{**ALL_STUDIES["steps"][0], "size": 1}]}
+    assert Executor(populated_os).execute(validate_plan(tiny)).steps[0].rows == 6
+
+
 def test_truncation_flag(populated_os: FakeOpenSearch) -> None:
-    ex = Executor(populated_os, max_rows=2)
-    result = ex.execute(
-        validate_plan(
-            {"steps": [{"index": "dicom_studies", "query": {"match_all": {}}, "size": 2}]}
-        )
+    result = Executor(populated_os, max_members=2).execute(validate_plan(ALL_STUDIES))
+    assert result.truncated is True and result.steps[0].rows == 2 and result.steps[0].total == 6
+    result = Executor(populated_os, max_members=2, page_size=1).execute(validate_plan(ALL_STUDIES))
+    assert result.truncated is True and result.steps[0].rows == 2
+    assert (
+        Executor(populated_os, max_members=6).execute(validate_plan(ALL_STUDIES)).truncated is False
     )
-    assert result.truncated is True
+
+
+def test_paged_hits_reads_everything_up_to_the_limit(
+    populated_os: FakeOpenSearch, monkeypatch: Any
+) -> None:
+    from scoutoss_copilot import executor
+
+    monkeypatch.setattr(executor, "PAGE_SIZE", 4)
+    body = {"query": {"match_all": {}}, "_source": ["study_uid"]}
+    rows = executor.paged_hits(populated_os, "dicom_studies", body)
+    assert sorted(r["study_uid"] for r in rows) == ["1.1", "1.2", "2.1", "3.1", "4.1", "5.1"]
+    assert len(executor.paged_hits(populated_os, "dicom_studies", body, limit=5)) == 5
 
 
 def test_errors_and_timeouts() -> None:

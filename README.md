@@ -42,6 +42,7 @@ make lint                    # ruff + mypy --strict
 make test                    # unit + integration (testcontainers), coverage gate 80%
 make ui-test                 # UI typecheck, eslint, vitest
 make helm-lint
+make loadtest                # 10,000 synthetic studies: copilot answers checked against ground truth
 ```
 
 | Service | Path | Stack |
@@ -58,7 +59,7 @@ make helm-lint
 * [Architecture](docs/architecture.md): diagrams, data flows, security model
 * [Runbook](docs/runbook.md): operations, re-indexing, alerting, backup and restore, DR
 * [API](docs/api.md): copilot and indexer endpoints, schemas, metrics
-* [Scaling](docs/scaling.md): backlog for 100,000 cases (planned, not implemented)
+* [Scaling](docs/scaling.md): measured at 10,000-40,000 studies (`make loadtest`); backlog for 100,000
 * [Compliance](docs/compliance.md): PHI data flow, de-identification spec, audit model, HIPAA/GDPR mapping
 
 ## License
