@@ -10,7 +10,13 @@ import httpx
 import pytest
 import respx
 
-from scoutoss_indexer.xnat_access import KeycloakDirectory, XnatAccess, run_forever, sync_once
+from scoutoss_indexer.xnat_access import (
+    KeycloakDirectory,
+    XnatAccess,
+    keep_warm,
+    run_forever,
+    sync_once,
+)
 
 KC = "http://kc.test"
 XNAT = "http://xnat.test"
@@ -167,6 +173,7 @@ def test_loop_survives_a_keycloak_outage_and_writes_heartbeat(
     respx_mock.get(f"{ADMIN}/groups/root/children").respond(json=[])
     respx_mock.get(f"{ADMIN}/users").respond(json=[])
     respx_mock.get(f"{XNAT}/xapi/users").respond(json=[])
+    respx_mock.get(f"{XNAT}/xapi/siteConfig/uptime").respond(500)  # warm-up failing is not fatal
 
     def projects(_: httpx.Request) -> httpx.Response:
         stop.set()  # second cycle reached XNAT: end the loop after it
@@ -197,3 +204,66 @@ def test_stale_token_is_dropped_on_401(
     respx_mock.get(f"{ADMIN}/users").mock(side_effect=users)
     assert directory.usernames() == {"demo"}
     assert tokens.call_count == 2
+
+
+WARM = f"{XNAT}/data/projects/P1/subjects/scoutoss-warmup"
+
+
+def mock_warm_up(mock: respx.MockRouter, *, assessor_status: int = 200) -> dict[str, respx.Route]:
+    mock.get(f"{XNAT}/data/projects").respond(json=result_set([{"ID": "P1"}]))
+    session = f"{WARM}/experiments/scoutoss-warmup-ct"
+    return {
+        "subject": mock.put(WARM).respond(201),
+        "session": mock.put(session).respond(201),
+        "lookup": mock.get(session).respond(json={"items": [{"data_fields": {"ID": "XNAT_E9"}}]}),
+        "assessor": mock.put(f"{session}/assessors/scoutoss-warmup-qc").respond(assessor_status),
+        "cleanup": mock.delete(WARM).respond(200),
+    }
+
+
+@respx.mock
+def test_warm_up_runs_on_first_cycle_and_after_an_xnat_restart(
+    xnat: XnatAccess, respx_mock: respx.MockRouter
+) -> None:
+    routes = mock_warm_up(respx_mock)
+    respx_mock.get(f"{XNAT}/xapi/siteConfig/uptime").mock(
+        side_effect=[
+            httpx.Response(200, json={"minutes": "2", "seconds": "5.5"}),
+            httpx.Response(200, json={"hours": "1", "minutes": "0", "seconds": "0"}),
+            httpx.Response(200, json={"seconds": "40.0"}),  # uptime went down: XNAT restarted
+        ]
+    )
+    uptime = keep_warm(xnat, None)
+    assert uptime == 125.5 and routes["assessor"].call_count == 1
+    body = routes["assessor"].calls.last.request.content.decode()
+    # the document carries every element the QC pipeline writes, and the real session ID
+    assert "<xnat:imageSession_ID>XNAT_E9</xnat:imageSession_ID>" in body
+    assert "xnat:scanStatistics" in body and "<xnat:note>" in body
+    uptime = keep_warm(xnat, uptime)
+    assert uptime == 3600 and routes["assessor"].call_count == 1  # still up: nothing to do
+    keep_warm(xnat, uptime)
+    assert routes["assessor"].call_count == 2 and routes["cleanup"].call_count == 2
+
+
+@respx.mock
+def test_warm_up_removes_its_placeholder_even_when_the_insert_fails(
+    xnat: XnatAccess, respx_mock: respx.MockRouter
+) -> None:
+    routes = mock_warm_up(respx_mock, assessor_status=500)
+    respx_mock.get(f"{XNAT}/xapi/siteConfig/uptime").respond(json={"seconds": "3"})
+    with pytest.raises(httpx.HTTPStatusError):
+        keep_warm(xnat, None)
+    assert routes["cleanup"].called
+
+
+@respx.mock
+def test_warm_up_cleans_up_when_the_session_lookup_fails(
+    xnat: XnatAccess, respx_mock: respx.MockRouter
+) -> None:
+    routes = mock_warm_up(respx_mock)
+    routes["lookup"].respond(406)  # XNAT refuses some Accept headers on this endpoint
+    respx_mock.get(f"{XNAT}/xapi/siteConfig/uptime").respond(json={"seconds": "3"})
+    with pytest.raises(httpx.HTTPStatusError):
+        keep_warm(xnat, None)
+    assert routes["cleanup"].called and not routes["assessor"].called
+    assert "*/*" in routes["lookup"].calls.last.request.headers["accept"]

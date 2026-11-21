@@ -169,7 +169,10 @@ jobs:
       - name: logs on failure
         if: failure()
         env: { COMPOSE_FILE: "docker-compose.yml:docker-compose.test.yml" }
-        run: docker compose logs --no-color --tail=300 > compose-logs.txt || true
+        run: |
+          docker compose logs --no-color --tail=300 > compose-logs.txt || true
+          # XNAT logs to files, not stdout: add the container-service log (pipeline failures)
+          { echo "===== xnat containers.log"; docker compose exec -T xnat-web sh -c 'tail -n 200 /data/xnat/home/logs/containers.log'; } >> compose-logs.txt 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: failure()
         with: { name: compose-logs, path: compose-logs.txt }

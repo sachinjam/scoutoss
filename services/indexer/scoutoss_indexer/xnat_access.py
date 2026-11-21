@@ -8,6 +8,9 @@ filters by). This job mirrors that membership into XNAT as the read-only ``colla
 * a group member who has an XNAT account and no role in the project is granted ``collaborator``;
 * a ``collaborator`` who is a Keycloak user but no longer in the group is removed.
 
+The same loop also keeps XNAT "warm" for pipeline results (see :meth:`XnatAccess.warm_up_qc`),
+because it is the one long-running process with XNAT admin rights.
+
 It never touches accounts Keycloak does not know (``admin``, the XNAT service accounts) and never
 changes ``owner``/``member`` roles, so manual grants made in XNAT are left alone. It runs as its own
 service because it needs XNAT site-admin and Keycloak user-lookup credentials that the indexer
@@ -130,7 +133,8 @@ class XnatAccess:
             auth=(user, password),
             timeout=30,
             transport=transport,
-            headers={"Accept": "application/json"},
+            # several XNAT endpoints answer 406 to a bare "application/json"
+            headers={"Accept": "application/json, text/plain, */*"},
         )
 
     def _rows(self, path: str) -> list[dict[str, Any]]:
@@ -156,6 +160,59 @@ class XnatAccess:
             if login:
                 out[login] = "collaborator" if "collaborator" in role else role
         return out
+
+    def uptime_seconds(self) -> float:
+        resp = self.http.get("/xapi/siteConfig/uptime")
+        resp.raise_for_status()
+        parts = resp.json()
+        return sum(
+            float(parts.get(unit) or 0) * factor
+            for unit, factor in (("days", 86400), ("hours", 3600), ("minutes", 60), ("seconds", 1))
+        )
+
+    def warm_up_qc(self, project: str) -> None:
+        """Store and remove one QC assessor with every element the QC pipeline writes.
+
+        XNAT's XML reader sets up each element type the first time it parses one after a start,
+        and that set-up is not safe under concurrent parsing: when a pipeline is launched on a
+        cohort, several assessor documents are finalised at once and uploads fail with
+        ``Invalid XML 'xnat:qcAssessmentData_scan:scans/scan'`` (or a duplicate key on
+        ``xdat_meta_element`` for the very first one). On a cold XNAT 9 of 11 concurrent uploads
+        failed; after this serial warm-up 33 of 33 succeeded. The placeholder session has no
+        scans, so the indexer ignores it.
+        """
+        subject = f"/data/projects/{project}/subjects/scoutoss-warmup"
+        session = f"{subject}/experiments/scoutoss-warmup-ct"
+        self.http.put(subject).raise_for_status()
+        try:
+            self.http.put(session, params={"xsiType": "xnat:ctSessionData"}).raise_for_status()
+            found = self.http.get(session, params={"format": "json"})
+            found.raise_for_status()
+            session_id = found.json()["items"][0]["data_fields"]["ID"]
+            xml = (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<xnat:QCAssessment xmlns:xnat="http://nrg.wustl.edu/xnat" '
+                'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+                f'label="scoutoss-warmup-qc" project="{project}" type="ScoutOSS-QC">'
+                "<xnat:date>2000-01-01</xnat:date>"
+                "<xnat:note>warm-up</xnat:note>"
+                f"<xnat:imageSession_ID>{session_id}</xnat:imageSession_ID>"
+                '<xnat:scans><xnat:scan id="1">'
+                '<xnat:scanStatistics xsi:type="xnat:statisticsData">'
+                "<xnat:mean>0</xnat:mean><xnat:snr>0</xnat:snr><xnat:min>0</xnat:min>"
+                "<xnat:max>0</xnat:max><xnat:stddev>0</xnat:stddev>"
+                "</xnat:scanStatistics></xnat:scan></xnat:scans>"
+                "</xnat:QCAssessment>"
+            )
+            self.http.put(
+                f"{session}/assessors/scoutoss-warmup-qc",
+                params={"inbody": "true"},
+                content=xml,
+                headers={"Content-Type": "text/xml"},
+            ).raise_for_status()
+        finally:
+            # always remove the placeholder, whichever step failed
+            self.http.delete(subject, params={"removeFiles": "true"}).raise_for_status()
 
     def grant(self, project: str, username: str) -> None:
         self.http.put(f"/data/projects/{project}/users/{ROLE}/{username}").raise_for_status()
@@ -191,6 +248,18 @@ def sync_once(directory: KeycloakDirectory, xnat: XnatAccess) -> SyncResult:
     return result
 
 
+def keep_warm(xnat: XnatAccess, last_uptime: float | None) -> float:
+    """Run the QC warm-up on the first cycle and whenever XNAT has restarted (its uptime went
+    down). Returns the uptime to compare against next time."""
+    uptime = xnat.uptime_seconds()
+    if last_uptime is None or uptime < last_uptime:
+        projects = xnat.projects()
+        if projects:
+            xnat.warm_up_qc(projects[0])
+            log.info("xnat warmed up for pipeline results", xnat_uptime_seconds=round(uptime))
+    return uptime
+
+
 def run_forever(
     directory: KeycloakDirectory,
     xnat: XnatAccess,
@@ -202,7 +271,13 @@ def run_forever(
     """Sync every ``interval`` seconds. A failed cycle is logged and retried; it never exits."""
     stop = stop or threading.Event()
     log.info("xnat access sync started", interval_seconds=interval)
+    last_uptime: float | None = None
     while not stop.is_set():
+        try:
+            last_uptime = keep_warm(xnat, last_uptime)
+        except (httpx.HTTPError, KeyError, ValueError, IndexError) as exc:
+            # retried next cycle; access sync below must not depend on it
+            log.warning("xnat warm-up failed", error=type(exc).__name__, detail=str(exc)[:200])
         try:
             sync_once(directory, xnat)
             if heartbeat is not None:

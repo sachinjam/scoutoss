@@ -102,6 +102,40 @@ def xnat(path: str) -> Any:
     return json.loads(out)
 
 
+def pipeline_diagnostics() -> dict[str, Any]:
+    """Why a pipeline produced nothing: XNAT's container records, its container-service errors
+    and what each container printed. Best effort; used only when the assessor check fails."""
+    out: dict[str, Any] = {}
+    try:
+        out["containers"] = [
+            {
+                "id": c.get("id"),
+                "status": c.get("status"),
+                "history": [
+                    f"{h.get('status')}: {(h.get('message') or '')[:160]}"
+                    for h in c.get("history", [])[-4:]
+                ],
+            }
+            for c in xnat("/xapi/containers")[-4:]
+        ]
+        out["container_service_errors"] = compose_exec(
+            "xnat-web",
+            "sh",
+            "-c",
+            "grep -hE 'ERROR|Caused by' /data/xnat/home/logs/containers.log | tail -8 | cut -c1-400",
+        ).splitlines()
+        out["container_output"] = compose_exec(
+            "xnat-web",
+            "sh",
+            "-c",
+            "for f in $(ls -t /data/xnat/archive/CONTAINER_EXEC/*/LOGS/docker/*.log 2>/dev/null"
+            ' | head -4); do echo "== $f"; tail -n 15 "$f" | cut -c1-300; done',
+        ).splitlines()
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as exc:
+        out["diagnostics_error"] = f"{type(exc).__name__}: {exc!s:.200}"
+    return out
+
+
 def opensearch(path: str, body: dict[str, Any] | None = None) -> Any:
     cmd = ["curl", "-s", "-H", "Content-Type: application/json", f"http://localhost:9200{path}"]
     if body is not None:
@@ -246,20 +280,30 @@ def main() -> int:
             launched=len(launched),
             body=None if launch.status_code == 200 else launch.text[:200],
         )
-        experiment = launched[0]["experiment_id"]
+        experiments = [item["experiment_id"] for item in launched]
+        experiment = experiments[0]
 
-        def assessor() -> Any:
-            rows = xnat(f"/data/experiments/{experiment}/assessors?format=json")["ResultSet"][
-                "Result"
-            ]
-            return [r for r in rows if "qcAssessmentData" in r.get("xsiType", "")]
+        def assessors() -> Any:
+            # every launched session must get its assessor: concurrent uploads used to fail for
+            # some of them, and checking only the first let that pass by luck
+            found_all = []
+            for exp in experiments:
+                rows = xnat(f"/data/experiments/{exp}/assessors?format=json")["ResultSet"]["Result"]
+                qc = [r for r in rows if "qcAssessmentData" in r.get("xsiType", "")]
+                if not qc:
+                    return None
+                found_all.append(qc[0])
+            return found_all
 
-        found = wait("assessor", assessor, time.time() + args.pipeline_timeout, every=5)
+        found = wait("assessor", assessors, time.time() + args.pipeline_timeout, every=5)
         step(
             "pipeline-assessor",
             bool(found),
             experiment=experiment,
             assessor=found[0].get("label") if found else None,
+            assessors=len(found) if found else 0,
+            launched=len(experiments),
+            **({} if found else pipeline_diagnostics()),
         )
 
     def audited() -> Any:
