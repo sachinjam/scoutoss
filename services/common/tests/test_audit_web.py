@@ -68,13 +68,14 @@ def test_request_log_carries_user_pseudonym() -> None:
 
     @app.get("/who")
     def who(request: Request) -> dict[str, str]:
-        request.state.principal = Principal(subject="abc", username="u")
+        request.state.principal = Principal(subject="raw-subject-Zq7", username="u")
         return {"ok": "1"}
 
     TestClient(app).get("/who")
     rec = [json.loads(line) for line in stream.getvalue().splitlines() if '"request"' in line][-1]
     assert rec["user_id"].startswith("u_") and rec["endpoint"] == "/who" and rec["status"] == 200
-    assert "latency_ms" in rec and "abc" not in json.dumps(rec)
+    # the raw subject must never be logged; it is not hex, so it cannot collide with random IDs
+    assert "latency_ms" in rec and "raw-subject-Zq7" not in json.dumps(rec)
 
 
 def test_middleware_metrics_and_request_id() -> None:
