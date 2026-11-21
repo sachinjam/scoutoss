@@ -33,7 +33,8 @@ poll, and C-STORE throughput for that many images.
 * A step matching more than 50,000 rows is truncated (flagged in the answer). Cohorts go back to
   OpenSearch as `terms` filters, which OpenSearch caps at 65,536 values.
 * Images need real storage: 10,000 CT/MR studies is roughly 2-5 TB in XNAT's archive.
-* "Run Pipeline on Cohort" is limited to 200 sessions per launch.
+* "Run Pipeline on Cohort" is limited to 200 sessions per launch and paced at four launches a
+  second (see the runbook); 148 QC runs complete in about 65 s.
 
 # Scaling to 100,000 cases (backlog)
 

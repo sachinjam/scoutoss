@@ -62,6 +62,7 @@ class CopilotSettings(BaseSettings):
     xnat_user: str = Field("scout_pipeline", alias="XNAT_PIPELINE_USER")
     xnat_password: str | None = Field(None, alias="XNAT_PIPELINE_PASSWORD")
     max_pipeline_sessions: int = Field(200, alias="MAX_PIPELINE_SESSIONS")
+    pipeline_launch_interval: float = Field(0.25, alias="PIPELINE_LAUNCH_INTERVAL_SECONDS", ge=0)
 
     def secret(self, name: str) -> str | None:
         value = {

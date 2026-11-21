@@ -16,6 +16,7 @@ EHR ─HL7─▶ Mirth ───────────────────
 ```bash
 make up      # generates .env + dev TLS certs, fetches XNAT plugins, boots and bootstraps everything
 make seed    # 10 synthetic fake-PHI studies (7 patients) + 13 HL7 messages
+             # make seed CASES=100 -> 100 generated patients (136 studies) with matching HL7
 make e2e     # C-STORE → XNAT → searchable < 60 s → copilot → pipeline → assessor → audit → SSO → UI in a browser
 ```
 
@@ -42,6 +43,7 @@ make lint                    # ruff + mypy --strict
 make test                    # unit + integration (testcontainers), coverage gate 80%
 make ui-test                 # UI typecheck, eslint, vitest
 make helm-lint
+make qc                      # run the QC pipeline on every study and verify each result
 make loadtest                # 10,000 synthetic studies: copilot answers checked against ground truth
 ```
 

@@ -160,6 +160,272 @@ def default_cohort(seed: int = 42) -> list[StudySpec]:
     return studies
 
 
+GIVEN_NAMES = {
+    "M": [
+        "James",
+        "Wei",
+        "Arjun",
+        "Mateo",
+        "Kwame",
+        "Hiroshi",
+        "Omar",
+        "Lukas",
+        "Tomasz",
+        "Rafael",
+        "Dmitri",
+        "Samuel",
+        "Ibrahim",
+        "Noah",
+        "Viktor",
+        "Andre",
+        "Tariq",
+        "Elias",
+        "Jonas",
+        "Felix",
+    ],
+    "F": [
+        "Mary",
+        "Li",
+        "Priya",
+        "Sofia",
+        "Amara",
+        "Yuki",
+        "Fatima",
+        "Hannah",
+        "Zofia",
+        "Camila",
+        "Olga",
+        "Ruth",
+        "Aisha",
+        "Emma",
+        "Ingrid",
+        "Chloe",
+        "Leila",
+        "Clara",
+        "Greta",
+        "Nora",
+    ],
+}
+FAMILY_NAMES = [
+    "Anderson",
+    "Chen",
+    "Patel",
+    "Rodriguez",
+    "Mensah",
+    "Tanaka",
+    "Haddad",
+    "Schmidt",
+    "Kowalski",
+    "Silva",
+    "Ivanov",
+    "Cohen",
+    "Diallo",
+    "Johnson",
+    "Larsen",
+    "Dubois",
+    "Rahman",
+    "Moreau",
+    "Becker",
+    "Rossi",
+    "Kim",
+    "Okoye",
+    "Novak",
+    "Fernandez",
+    "Singh",
+]
+
+
+@dataclass(frozen=True)
+class Condition:
+    """A diagnosis and the imaging a patient with it typically gets (all invented)."""
+
+    code: str
+    text: str
+    weight: int
+    studies: tuple[tuple[str, str, str, str | None, str, str], ...]
+    # (modality, study description, series description, body part, manufacturer, model)
+    order: tuple[str, str] | None = None  # (order code, order text)
+    labs: bool = False
+
+
+CONDITIONS: tuple[Condition, ...] = (
+    Condition(
+        "C34.90",
+        "Malignant neoplasm of unspecified part of bronchus or lung",
+        18,
+        (
+            ("CT", "CT CHEST W CONTRAST", "Axial 1.0 Lung", "CHEST", "SIEMENS", "SOMATOM Force"),
+            ("PT", "PET CT WHOLE BODY", "PET AC", "WHOLEBODY", "SIEMENS", "Biograph Vision"),
+        ),
+        order=("CTCHEST", "CT chest with contrast"),
+        labs=True,
+    ),
+    Condition(
+        "I63.9",
+        "Cerebral infarction, unspecified",
+        16,
+        (
+            (
+                "CT",
+                "CT HEAD WITHOUT CONTRAST",
+                "Brain 5mm",
+                "HEAD",
+                "GE MEDICAL SYSTEMS",
+                "Revolution CT",
+            ),
+            (
+                "MR",
+                "MR BRAIN W WO CONTRAST",
+                "DWI AX",
+                "BRAIN",
+                "GE MEDICAL SYSTEMS",
+                "SIGNA Premier",
+            ),
+        ),
+        order=("CTHEAD", "CT head without contrast"),
+    ),
+    Condition(
+        "J18.9",
+        "Pneumonia, unspecified organism",
+        16,
+        (
+            ("CR", "CR CHEST PA AND LATERAL", "PA", "CHEST", "FUJIFILM Corporation", "FCR"),
+            (
+                "CT",
+                "CT CHEST W/O CONTRAST",
+                "Axial 3.0 Soft",
+                "CHEST",
+                "Canon Medical Systems",
+                "Aquilion ONE",
+            ),
+        ),
+        labs=True,
+    ),
+    Condition(
+        "J44.9",
+        "Chronic obstructive pulmonary disease, unspecified",
+        10,
+        (
+            ("CT", "CT CHEST LOW DOSE", "Lung 1mm", "CHEST", "SIEMENS", "SOMATOM Force"),
+            ("CR", "CR CHEST PA", "PA", "CHEST", "FUJIFILM Corporation", "FCR"),
+        ),
+    ),
+    Condition(
+        "C22.0",
+        "Liver cell carcinoma",
+        8,
+        (
+            (
+                "CT",
+                "CT ABDOMEN PELVIS W CONTRAST",
+                "Portal venous",
+                "ABDOMEN",
+                "SIEMENS",
+                "SOMATOM Force",
+            ),
+            ("MR", "MR ABDOMEN W WO CONTRAST", "T1 VIBE", "ABDOMEN", "Philips", "Ingenia"),
+        ),
+        order=("CTABD", "CT abdomen and pelvis with contrast"),
+        labs=True,
+    ),
+    Condition(
+        "C71.9",
+        "Malignant neoplasm of brain, unspecified",
+        8,
+        (
+            ("MR", "MR BRAIN W WO CONTRAST", "T1 AX POST", "BRAIN", "SIEMENS", "MAGNETOM Vida"),
+            (
+                "CT",
+                "CT HEAD WITHOUT CONTRAST",
+                "Brain 5mm",
+                "HEAD",
+                "GE MEDICAL SYSTEMS",
+                "Revolution CT",
+            ),
+        ),
+        order=("MRBRAIN", "MR brain with and without contrast"),
+    ),
+    Condition(
+        "I10",
+        "Essential (primary) hypertension",
+        14,
+        (
+            ("CR", "CR CHEST PA", "PA", "CHEST", "FUJIFILM Corporation", "FCR"),
+            (
+                "CT",
+                "CT ABDOMEN PELVIS",
+                "Axial 5mm",
+                "ABDOMEN",
+                "GE MEDICAL SYSTEMS",
+                "Revolution CT",
+            ),
+        ),
+    ),
+    Condition(
+        "M17.9",
+        "Osteoarthritis of knee, unspecified",
+        10,
+        (
+            ("MR", "MR KNEE LEFT", "PD FS SAG", "KNEE", "Philips", "Ingenia"),
+            ("CR", "CR KNEE 2 VIEWS", "AP", "KNEE", "FUJIFILM Corporation", "FCR"),
+        ),
+    ),
+)
+
+
+@dataclass
+class Case:
+    """One synthetic patient: identity, diagnosis and imaging studies."""
+
+    patient: FakePatient
+    condition: Condition
+    studies: list[StudySpec]
+
+
+def generate_cases(count: int, seed: int = 2024) -> list[Case]:
+    """``count`` invented patients, each with a diagnosis and one or two matching studies.
+
+    Deterministic for a seed (same names, MRNs, dates and UIDs every run, so re-seeding is
+    idempotent downstream). MRNs start at ``MRN5`` + seed so they never collide with the default
+    cohort's. About one in twelve patients is over 89 to exercise the age cap.
+    """
+    rng = random.Random(seed)
+    cases: list[Case] = []
+    for n in range(count):
+        sex = rng.choice(["M", "F"])
+        name = f"{FAMILY_NAMES[(n * 7 + seed) % len(FAMILY_NAMES)]}^{rng.choice(GIVEN_NAMES[sex])}"
+        age_years = rng.randint(90, 96) if rng.random() < 0.08 else rng.randint(28, 88)
+        first_study = date(2019, 1, 1) + timedelta(days=rng.randrange(365 * 4))
+        birth = date(first_study.year - age_years, rng.randint(1, 12), rng.randint(1, 28))
+        patient = FakePatient(name, f"MRN5{seed % 100:02d}{n:04d}", sex, birth)
+        condition = rng.choices(CONDITIONS, weights=[c.weight for c in CONDITIONS])[0]
+        studies = []
+        for k in range(2 if rng.random() < 0.3 else 1):
+            modality, description, series_desc, body_part, maker, model = condition.studies[k]
+            series = [SeriesSpec(modality, series_desc, body_part, 1 if modality == "CR" else 6)]
+            if modality in ("CT", "MR") and rng.random() < 0.4:
+                series.append(SeriesSpec(modality, f"{series_desc} recon", body_part, 6))
+            spec = StudySpec(
+                patient,
+                first_study + timedelta(days=k * rng.randint(20, 120)),
+                description,
+                series,
+                manufacturer=maker,
+                model=model,
+                accession=f"ACC5{seed % 100:02d}{n:04d}{k}",
+            )
+            spec.study_uid = generate_uid(
+                prefix=UID_ROOT, entropy_srcs=[str(seed), "case", str(n), str(k)]
+            )
+            for j, one in enumerate(series):
+                one.series_uid = generate_uid(
+                    prefix=UID_ROOT, entropy_srcs=[str(seed), "case-series", str(n), str(k), str(j)]
+                )
+            studies.append(spec)
+        cases.append(Case(patient, condition, studies))
+    return cases
+
+
 def _phantom(modality: str, body_part: str | None, size: int, z: float) -> bytes:
     """Signed 16-bit phantom: body ellipse, lungs for chest, skull ring for head."""
     out = bytearray()

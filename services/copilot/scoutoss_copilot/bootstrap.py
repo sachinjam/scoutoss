@@ -63,5 +63,6 @@ def build_deps(settings: CopilotSettings | None = None) -> CopilotDeps:
         search=search,
         pipelines=pipelines,
         max_pipeline_sessions=settings.max_pipeline_sessions,
+        pipeline_launch_interval=settings.pipeline_launch_interval,
         ready_checks=(postgres,),
     )

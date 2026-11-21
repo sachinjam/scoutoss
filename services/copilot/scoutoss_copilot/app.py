@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
@@ -39,6 +40,10 @@ class CopilotDeps:
     search: Any  # OpenSearch-like client (exports, pipeline lookups, readiness)
     pipelines: XnatPipelines | None = None
     max_pipeline_sessions: int = 200
+    # Pause between launches. XNAT learns that a container finished by polling Docker's event
+    # history, which only keeps the last 256 events; a burst of launches overflows it and the
+    # results of some containers are never uploaded (31 of 148 in one unpaced run).
+    pipeline_launch_interval: float = 0.25
     ready_checks: tuple[Callable[[], bool], ...] = field(default_factory=tuple)
 
 
@@ -347,7 +352,9 @@ def create_app(deps: CopilotDeps | None = None, *, build: bool = True) -> FastAP
         )
         launches, errors = [], []
         wrappers: dict[str, dict[str, Any]] = {}
-        for s in studies:
+        for n, s in enumerate(studies):
+            if n and d.pipeline_launch_interval > 0:
+                time.sleep(d.pipeline_launch_interval)
             project = s["project"]
             if project not in wrappers:
                 try:

@@ -30,6 +30,7 @@ def deps(make_copilot: Any, populated_os: FakeOpenSearch, rsa_keys: dict[str, An
         search=populated_os,
         pipelines=XnatPipelines(XNAT, "scout_pipeline", "pw"),
         max_pipeline_sessions=10,
+        pipeline_launch_interval=0,
         ready_checks=(lambda: True,),
     )
 
@@ -289,6 +290,30 @@ def test_run_pipeline_on_cohort(
         partial = client.post(f"/cohorts/{cohort_id}/pipeline", json={}, headers=h).json()
         assert len(partial["errors"]) == 3
     assert ("pipeline_launch", "success") in audit_actions(populated_os)
+
+
+def test_pipeline_launches_are_paced(
+    client: TestClient,
+    make_token: Callable[..., str],
+    populated_os: FakeOpenSearch,
+    deps: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Launches are spaced out so Docker's 256-event history cannot overflow under XNAT."""
+    from scoutoss_copilot import app as app_module
+
+    pauses: list[float] = []
+    monkeypatch.setattr(app_module.time, "sleep", pauses.append)
+    deps.pipeline_launch_interval = 0.25
+    h = H(make_token)
+    cohort_id = client.post("/query", json={"question": "CT chest"}, headers=h).json()["cohort_id"]
+    with respx.mock(assert_all_called=False) as router:
+        launch = _mock_xnat(router)
+        resp = client.post(
+            f"/cohorts/{cohort_id}/pipeline", json={"pipeline": "scoutoss-qc-session"}, headers=h
+        )
+    assert resp.status_code == 200 and launch.call_count == 3
+    assert pauses == [0.25, 0.25]  # between launches, not before the first
 
 
 def test_pipeline_limits_and_unconfigured(

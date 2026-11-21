@@ -109,6 +109,18 @@ signed in silently; their XNAT account (same username) is created on first visit
   `query-groups`). "You do not have access to this project" on the landing page means the user is
   not in the project's Keycloak group.
 
+### Pipelines on a cohort
+"Run Pipeline on Cohort" (and `make qc`, its scripted form) launches one container per session,
+a quarter of a second apart (`PIPELINE_LAUNCH_INTERVAL_SECONDS`), at most `MAX_PIPELINE_SESSIONS`
+(200) per request. The pause matters: XNAT finds out that a container finished by polling
+Docker's event history, which keeps only the last 256 events. Launched in one burst, 148 QC
+containers overflowed it and 31 results were never uploaded; paced, 296 of 296 arrived.
+
+If results are missing, look at `/xapi/containers` in XNAT: a record stuck in `Created` or
+`Running` whose container has already exited in the job engine (`docker compose exec job-engine
+docker ps -a`) was missed. `POST /xapi/containers/{id}/finalize` as an XNAT admin uploads its
+output. Do not finalize a container that is still running.
+
 ### HL7
 Mirth Administrator: `https://<mirth>:8443` (admin / `MIRTH_ADMIN_PASSWORD`). ACK `AE`
 means the indexer rejected or failed the batch (it is in the DLQ when indexing failed);

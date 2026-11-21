@@ -42,8 +42,8 @@ ps: ## Show service status
 	$(COMPOSE) ps
 
 .PHONY: seed
-seed: ## Push 10 synthetic (fake-PHI) studies through the de-id gateway and HL7 feed
-	$(PY) python scripts/seed.py
+seed: ## Push synthetic (fake-PHI) studies + HL7 through the real path. CASES=100 for 100 generated patients
+	$(PY) python scripts/seed.py $(if $(CASES),--cases $(CASES),)
 
 .PHONY: health
 health: ## Health-check every service
@@ -80,6 +80,10 @@ test-in-docker: ## Run the integration suite inside docker-compose.test.yml
 .PHONY: e2e
 e2e: ## End-to-end smoke test against a running stack (`make up` first)
 	@scripts/e2e.sh
+
+.PHONY: qc
+qc: ## Run the QC pipeline on every study the demo user can see and verify each result
+	$(PY) python scripts/run_pipeline.py
 
 .PHONY: loadtest
 loadtest: ## Scale test: index STUDIES synthetic studies (default 10000), check copilot answers and speed

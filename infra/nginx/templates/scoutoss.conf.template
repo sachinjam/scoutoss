@@ -71,6 +71,8 @@ server {
     proxy_cache off;
     proxy_set_header Connection "";
     proxy_http_version 1.1;
+    # "Run Pipeline on Cohort" paces its launches: up to 200 sessions take about a minute
+    proxy_read_timeout 300s;
   }
 
   # ---- oauth2-proxy (Keycloak) guards the tool UIs below

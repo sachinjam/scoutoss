@@ -6,6 +6,10 @@
 2. Sends matching HL7v2 messages (ADT^A01, ORM^O01, ORU^R01 with lung-cancer diagnoses for
    three patients) to the Mirth MLLP listener, if it is running.
 
+``--cases N`` seeds N generated patients instead (``make seed CASES=100``): each has a diagnosis
+and one or two matching studies (lung cancer -> CT chest + PET, stroke -> CT head + MR brain...),
+with an admission, and for some an order and lab results, sent as HL7.
+
 Optional: ``--tcia COLLECTION`` additionally downloads one small public study from the TCIA
 NBIA API and pushes it through the same gateway.
 
@@ -30,7 +34,16 @@ sys.path.insert(0, str(ROOT / "services" / "indexer"))
 
 from pydicom.dataset import Dataset  # noqa: E402
 
-from scoutoss_indexer.synthetic import LUNG_CANCER_MRNS, PATIENTS, default_cohort, make_instance  # noqa: E402
+from scoutoss_indexer.synthetic import (  # noqa: E402
+    LUNG_CANCER_MRNS,
+    PATIENTS,
+    Case,
+    FakePatient,
+    StudySpec,
+    default_cohort,
+    generate_cases,
+    make_instance,
+)
 
 MLLP_START, MLLP_END = b"\x0b", b"\x1c\x0d"
 
@@ -67,52 +80,87 @@ def send_datasets(host: str, port: int, datasets: list[Dataset], called_ae: str)
     return ok
 
 
-def seed_dicom(host: str, port: int, project: str) -> int:
+def seed_dicom(host: str, port: int, project: str, studies: list[StudySpec]) -> int:
     total = 0
-    for study in default_cohort():
+    for n, study in enumerate(studies, start=1):
         datasets = [make_instance(study, s, i) for s in study.series for i in range(s.slices)]
         sent = send_datasets(host, port, datasets, project)
         total += sent
-        log("study sent", modality=study.series[0].modality, instances=sent)
+        log("study sent", n=n, of=len(studies), modality=study.series[0].modality, instances=sent)
     return total
 
 
-def hl7_messages() -> list[str]:
-    """One admission per patient; lung-cancer diagnoses + CT orders + labs for three."""
-    msgs = []
-    for i, p in enumerate(PATIENTS):
-        family, given = p.name.split("^")[:2]
-        pid = (
-            f"PID|1||{p.mrn}^^^SPRINGFIELD^MR||{family}^{given}||{p.birth_date:%Y%m%d}|{p.sex}|||"
-            "742 Evergreen Terrace^^Springfield^IL^62704||555-867-5309"
-        )
-        ts = f"2022011{i % 10}0930"
+def patient_messages(
+    i: int,
+    p: FakePatient,
+    *,
+    code: str,
+    text: str,
+    when: str,
+    order: tuple[str, str] | None,
+    labs: bool,
+) -> list[str]:
+    """ADT^A01 with the diagnosis, plus an order (ORM^O01) and lab results (ORU^R01) if given."""
+    family, given = p.name.split("^")[:2]
+    pid = (
+        f"PID|1||{p.mrn}^^^SPRINGFIELD^MR||{family}^{given}||{p.birth_date:%Y%m%d}|{p.sex}|||"
+        "742 Evergreen Terrace^^Springfield^IL^62704||555-867-5309"
+    )
 
-        def msh(kind: str, ctrl: str, ts: str = ts) -> str:
-            return f"MSH|^~\\&|EPIC|SPRINGFIELD|SCOUTOSS|SCOUT|{ts}||{kind}|{ctrl}|P|2.5.1"
+    def msh(kind: str, ctrl: str) -> str:
+        return f"MSH|^~\\&|EPIC|SPRINGFIELD|SCOUTOSS|SCOUT|{when}||{kind}|{ctrl}|P|2.5.1"
 
-        dg1 = ""
-        if p.mrn in LUNG_CANCER_MRNS:
-            dg1 = (
-                "\rDG1|1|I10|C34.90^Malignant neoplasm of unspecified part of bronchus or lung^I10||"
-                + ts
-                + "|F"
-            )
-        else:
-            dg1 = "\rDG1|1|I10|I10^Essential (primary) hypertension^I10||" + ts + "|F"
+    tag = p.mrn[-6:]
+    msgs = [
+        f"{msh('ADT^A01^ADT_A01', f'ADT{tag}')}\rEVN|A01|{when}\r{pid}\rPV1|1|I|ONC^101^1"
+        f"\rDG1|1|I10|{code}^{text}^I10||{when}|F"
+    ]
+    if order:
         msgs.append(
-            f"{msh('ADT^A01^ADT_A01', f'ADT{i:04d}')}\rEVN|A01|{ts}\r{pid}\rPV1|1|I|ONC^101^1{dg1}"
+            f"{msh('ORM^O01^ORM_O01', f'ORM{tag}')}\r{pid}\rORC|NW|ORD{tag}\r"
+            f"OBR|1|ORD{tag}||{order[0]}^{order[1]}^L|||{when}"
         )
-        if p.mrn in LUNG_CANCER_MRNS:
-            msgs.append(
-                f"{msh('ORM^O01^ORM_O01', f'ORM{i:04d}')}\r{pid}\rORC|NW|ORD{i:04d}\r"
-                f"OBR|1|ORD{i:04d}||CTCHEST^CT chest with contrast^L|||{ts}"
-            )
-            msgs.append(
-                f"{msh('ORU^R01^ORU_R01', f'ORU{i:04d}')}\r{pid}\rOBR|1|ORD{i:04d}||LAB^Panel^L|||{ts}\r"
-                f"OBX|1|NM|2160-0^Creatinine^LN||1.{i}|mg/dL|0.6-1.3|{'H' if i > 2 else 'N'}|||F\r"
-                f"OBX|2|NM|1751-7^Albumin^LN||3.{i}|g/dL|3.5-5.0|L|||F"
-            )
+    if labs:
+        msgs.append(
+            f"{msh('ORU^R01^ORU_R01', f'ORU{tag}')}\r{pid}\rOBR|1|ORD{tag}||LAB^Panel^L|||{when}\r"
+            f"OBX|1|NM|2160-0^Creatinine^LN||1.{i % 10}|mg/dL|0.6-1.3|{'H' if i % 10 > 2 else 'N'}|||F\r"
+            f"OBX|2|NM|1751-7^Albumin^LN||3.{i % 10}|g/dL|3.5-5.0|L|||F"
+        )
+    return msgs
+
+
+def hl7_messages() -> list[str]:
+    """Default cohort: one admission per patient; lung-cancer diagnoses + CT orders + labs
+    for three."""
+    msgs: list[str] = []
+    for i, p in enumerate(PATIENTS):
+        cancer = p.mrn in LUNG_CANCER_MRNS
+        msgs += patient_messages(
+            i,
+            p,
+            code="C34.90" if cancer else "I10",
+            text="Malignant neoplasm of unspecified part of bronchus or lung"
+            if cancer
+            else "Essential (primary) hypertension",
+            when=f"2022011{i % 10}0930",
+            order=("CTCHEST", "CT chest with contrast") if cancer else None,
+            labs=cancer,
+        )
+    return msgs
+
+
+def case_messages(cases: list[Case]) -> list[str]:
+    msgs: list[str] = []
+    for i, case in enumerate(cases):
+        msgs += patient_messages(
+            i,
+            case.patient,
+            code=case.condition.code,
+            text=case.condition.text,
+            when=f"{case.studies[0].study_date:%Y%m%d}0930",
+            order=case.condition.order,
+            labs=case.condition.labs,
+        )
     return msgs
 
 
@@ -128,14 +176,14 @@ def send_mllp(host: str, port: int, message: str, timeout: float = 15) -> str:
     return data.strip(MLLP_START + MLLP_END).decode(errors="replace")
 
 
-def seed_hl7(host: str, port: int) -> int:
+def seed_hl7(host: str, port: int, messages: list[str]) -> int:
     try:
         socket.create_connection((host, port), timeout=3).close()
     except OSError:
         log("MLLP listener not reachable; skipping HL7 seed", port=port)
         return 0
     acked = 0
-    for msg in hl7_messages():
+    for msg in messages:
         ack = send_mllp(host, port, msg)
         if "MSA|AA" in ack or "MSA|CA" in ack:
             acked += 1
@@ -178,13 +226,26 @@ def main() -> int:
     parser.add_argument("--dicom-port", type=int, default=int(dotenv("DICOM_PORT", "24112")))
     parser.add_argument("--mllp-port", type=int, default=int(dotenv("MLLP_PORT", "26661")))
     parser.add_argument("--project", default=dotenv("DEFAULT_PROJECT", "SCOUT_DEMO"))
+    parser.add_argument(
+        "--cases", type=int, default=0, help="seed N generated patients instead of the default 10"
+    )
+    parser.add_argument("--case-seed", type=int, default=2024, help="which generated patients")
     parser.add_argument("--skip-dicom", action="store_true")
     parser.add_argument("--skip-hl7", action="store_true")
     parser.add_argument("--tcia", metavar="COLLECTION", help="also push one small TCIA CT series")
     args = parser.parse_args()
     start = time.time()
-    instances = 0 if args.skip_dicom else seed_dicom(args.host, args.dicom_port, args.project)
-    hl7 = 0 if args.skip_hl7 else seed_hl7(args.host, args.mllp_port)
+    if args.cases:
+        cases = generate_cases(args.cases, seed=args.case_seed)
+        studies = [study for case in cases for study in case.studies]
+        messages = case_messages(cases)
+        log("generated cases", patients=len(cases), studies=len(studies), hl7=len(messages))
+    else:
+        studies, messages = default_cohort(), hl7_messages()
+    instances = (
+        0 if args.skip_dicom else seed_dicom(args.host, args.dicom_port, args.project, studies)
+    )
+    hl7 = 0 if args.skip_hl7 else seed_hl7(args.host, args.mllp_port, messages)
     if args.tcia:
         instances += seed_tcia(args.host, args.dicom_port, args.project, args.tcia)
     log(
