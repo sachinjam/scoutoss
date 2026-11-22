@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 import structlog
 
+from scoutoss_common.xnat_session import XnatSessionAuth
 from scoutoss_indexer.cursor import CursorStore, needs_processing
 from scoutoss_indexer.pipeline import WorkItem
 
@@ -35,7 +36,7 @@ class XnatClient:
     ) -> None:
         self.http = httpx.Client(
             base_url=base_url.rstrip("/"),
-            auth=(user, password),
+            auth=XnatSessionAuth(base_url, user, password),
             timeout=timeout,
             transport=transport,
             headers={"Accept": "application/json"},

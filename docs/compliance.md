@@ -88,7 +88,7 @@ names, text results) is scrubbed; addresses, phone numbers and names are never e
 | Field | Meaning |
 |---|---|
 | `user` | `u_` + SHA-256(Keycloak `sub`)[:16] (pseudonymous, resolvable via Keycloak) |
-| `action` | `query`, `cohort_save`, `cohort_read`, `export`, `pipeline_launch`, `reindex`, `clinical_ingest` |
+| `action` | `query`, `cohort_save`, `cohort_read`, `export`, `pipeline_launch`, `dicom_export`, `reindex`, `clinical_ingest` |
 | `resource` | cohort id / index / project |
 | `params_hash` | SHA-256 of the canonical request parameters (no raw text) |
 | `ts`, `ip`, `service`, `trace_id`, `outcome` | when/where/which trace; `success`, `rejected`, `phi_blocked` |
@@ -115,6 +115,7 @@ the IdP; XNAT keeps its own access logs.
 | Contingency plan / backup | 164.308(a)(7) | Art. 32(1)(c) | runbook backup/restore, RPO/RTO, quarterly restore test |
 | Security management / vulnerabilities | 164.308(a)(1) | Art. 32(1)(d) | CI: Trivy image + config scans, pinned images, non-root containers, mypy/ruff gates |
 | Re-identification | 164.514(c) | Art. 11 | only via the vault (role `deid_svc` + key escrow), outside the research zone; honest-broker procedure |
+| Disclosure of AI results over DICOM | 164.502(b), 164.514(a) | Art. 5(1)(c), 32 | `dicom-export` sends only objects in the session's own study that carry a ScoutOSS pseudonym, to one configured destination; each send is audited first (`dicom_export`, user `service:dicom-export`) and nothing is sent if the trail is unavailable; no re-identification |
 
 ## Container hardening exceptions (dev compose)
 

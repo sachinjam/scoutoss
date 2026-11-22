@@ -104,7 +104,7 @@ def test_grants_members_with_an_account_and_revokes_removed_ones(
     # left: a Keycloak user no longer in the group -> removed. localonly is unknown to Keycloak
     # and scout_indexer is not a collaborator: both untouched.
     assert result.revoked == [("P1", "left")] and revoke.called
-    assert respx_mock.calls.last.request.headers["authorization"].startswith("Basic ")
+    assert respx_mock.calls.last.request.headers["cookie"] == "JSESSIONID=test-session"
 
 
 @respx.mock

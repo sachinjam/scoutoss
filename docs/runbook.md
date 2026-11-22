@@ -122,6 +122,47 @@ If results are missing, look at `/xapi/containers` in XNAT: a record stuck in `C
 docker ps -a`) was missed. `POST /xapi/containers/{id}/finalize` as an XNAT admin uploads its
 output. Do not finalize a container that is still running.
 
+### DICOM export of AI results
+`dicom-export` sends what pipelines leave in the session resource `AI_DICOM` to one DICOM
+destination. Set `DICOM_EXPORT_HOST`, `DICOM_EXPORT_PORT`, `DICOM_EXPORT_AE` (the destination's AE
+title) and optionally `DICOM_EXPORT_CALLING_AE` (default `SCOUTOSS`) in `.env`, then
+`docker compose up -d dicom-export`. In Helm: `dicomExport.enabled`, `.host`, `.port`, `.aeTitle`.
+The destination has to accept C-STORE from the calling AE title (and C-FIND, for `--verify`).
+Without these settings the dev stack sends to its own Orthanc (`dicom-dest`, AE `RESEARCHPACS`):
+http://127.0.0.1:28042, user `scout`, password `ORTHANC_PASSWORD` in `.env`.
+
+```bash
+docker compose exec dicom-export scoutoss-indexer dicom-export --status   # sent / rejected / error
+docker compose exec dicom-export scoutoss-indexer dicom-export --verify   # C-FIND: is it there?
+```
+
+* **Results are de-identified.** The destination receives the pseudonymous patient ID and hashed
+  study UID that XNAT holds. Send to a research PACS or viewer. A clinical PACS would file them
+  under an unknown patient; re-identification is not implemented.
+* `rejected` files are never retried: not DICOM, not in the session's study, or a `PatientID`
+  that is not a ScoutOSS pseudonym. The reason is in the service log and in
+  `indexer.dicom_export.last_error`.
+* `error` means the destination refused the object (often an SOP class it does not accept). It is
+  retried up to `DICOM_EXPORT_MAX_ATTEMPTS` (5) times. To send again after fixing the destination,
+  or to re-send everything to a new one: `DELETE FROM indexer.dicom_export WHERE status = 'error'`
+  (rows are per destination, so a changed host, port or AE title starts from nothing sent).
+* A destination that is down is logged as `dicom destination unavailable` each cycle and nothing
+  is lost; sending resumes when it is back.
+* Files are told apart by name and size (XNAT has no checksum for files stored by the Container
+  Service). A pipeline that regenerates a result must write it under a new file name, as the QC
+  pipeline does; keep its DICOM UIDs stable so the destination replaces the old object.
+
+To have your own pipeline's output exported, write DICOM files to a folder of its output mount
+and add an output handler `"type": "Resource", "label": "AI_DICOM"` on the session (see
+`xnat/commands/scoutoss-qc.json`).
+
+### XNAT login sessions
+XNAT opens a login session for every request made with a username and password, keeps it for 15
+minutes and answers 401 once an account has 1,000 open (`concurrentMaxSessions`). The services
+therefore log in once and reuse the session. Scripts that call XNAT with `curl -u` in a loop can
+still exhaust an account: `GET /xapi/users/active` shows the counts and
+`DELETE /xapi/users/active/{username}` (as an XNAT admin) clears them.
+
 ### HL7
 Mirth Administrator: `https://<mirth>:8443` (admin / `MIRTH_ADMIN_PASSWORD`). ACK `AE`
 means the indexer rejected or failed the batch (it is in the DLQ when indexing failed);

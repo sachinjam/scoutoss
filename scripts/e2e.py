@@ -90,6 +90,30 @@ def compose_exec(service: str, *cmd: str) -> str:
     ).stdout
 
 
+def export_report(flag: str) -> dict[str, Any]:
+    """``scoutoss-indexer dicom-export --status`` / ``--verify`` (C-FIND at the destination)."""
+    done = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "dicom-export",
+            "scoutoss-indexer",
+            "dicom-export",
+            flag,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    lines = [line for line in done.stdout.splitlines() if line.startswith("{")]
+    report: dict[str, Any] = (
+        json.loads(lines[-1]) if lines else {"sessions_sent": [], "missing": ["?"]}
+    )
+    return report
+
+
 def xnat(path: str) -> Any:
     out = compose_exec(
         "xnat-web",
@@ -306,12 +330,30 @@ def main() -> int:
             **({} if found else pipeline_diagnostics()),
         )
 
+        def exported() -> Any:
+            # the QC result page of every launched session, sent to the DICOM destination
+            report = export_report("--status")
+            return report if set(experiments) <= set(report["sessions_sent"]) else None
+
+        sent = wait("dicom-export", exported, time.time() + 120, every=5)
+        at_destination = export_report("--verify") if sent else {}
+        step(
+            "dicom-export",
+            bool(sent) and not at_destination["missing"],
+            destination=(sent or {}).get("destination"),
+            sessions_sent=len(set(experiments) & set((sent or {}).get("sessions_sent", []))),
+            launched=len(experiments),
+            studies_at_destination=at_destination.get("studies_at_destination"),
+            missing=at_destination.get("missing"),
+            **({} if sent else {"state": export_report("--status")}),
+        )
+
     def audited() -> Any:
         resp = opensearch(
             "/audit/_search", {"size": 0, "aggs": {"a": {"terms": {"field": "action"}}}}
         )
         actions = {b["key"] for b in resp["aggregations"]["a"]["buckets"]}
-        wanted = {"query"} | (set() if args.skip_pipeline else {"pipeline_launch"})
+        wanted = {"query"} | (set() if args.skip_pipeline else {"pipeline_launch", "dicom_export"})
         return actions if wanted <= actions else None
 
     actions = wait("audit", audited, time.time() + 20)

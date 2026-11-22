@@ -29,6 +29,8 @@ from typing import Any
 import httpx
 import structlog
 
+from scoutoss_common.xnat_session import XnatSessionAuth
+
 log = structlog.get_logger(__name__)
 
 ROLE = "collaborator"
@@ -130,7 +132,7 @@ class XnatAccess:
     ) -> None:
         self.http = httpx.Client(
             base_url=base_url.rstrip("/"),
-            auth=(user, password),
+            auth=XnatSessionAuth(base_url, user, password),
             timeout=30,
             transport=transport,
             # several XNAT endpoints answer 406 to a bare "application/json"

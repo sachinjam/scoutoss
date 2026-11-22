@@ -33,6 +33,7 @@ from pydicom.dataset import Dataset
 from pydicom.uid import ExplicitVRLittleEndian, ImplicitVRLittleEndian
 
 from scoutoss_common.web import install_observability
+from scoutoss_common.xnat_session import XnatSessionAuth
 from scoutoss_indexer.deid.deidentify import DeidConfig, Deidentifier, DeidRejected
 from scoutoss_indexer.deid.vault import Vault
 
@@ -99,7 +100,7 @@ class XnatArchiver:
     ) -> None:
         self.http = httpx.Client(
             base_url=base_url.rstrip("/"),
-            auth=(user, password),
+            auth=XnatSessionAuth(base_url, user, password),
             timeout=60,
             transport=transport,
             headers={"Accept": "application/json, */*"},

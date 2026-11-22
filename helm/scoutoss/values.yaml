@@ -146,6 +146,22 @@ xnatAccessSync:
     requests: { cpu: 25m, memory: 96Mi }
     limits: { cpu: 250m, memory: 256Mi }
 
+# Sends AI results (XNAT session resource AI_DICOM) to a DICOM destination by C-STORE.
+# Off until a destination is named. Results stay de-identified: use a research PACS or viewer,
+# not the clinical PACS. The destination must accept the calling AE title.
+dicomExport:
+  enabled: false
+  host: ""                 # e.g. pacs.research.example.org
+  port: 104
+  aeTitle: ""              # the destination's (called) AE title
+  callingAeTitle: SCOUTOSS
+  resource: AI_DICOM
+  intervalSeconds: 30
+  staleAfterSeconds: 600   # restart the pod if no cycle has reached XNAT for this long
+  resources:
+    requests: { cpu: 25m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
 monitoring:
   serviceMonitor: true
   prometheusRule: true

@@ -11,6 +11,7 @@ import httpx
 import structlog
 
 from scoutoss_common.catalog import EXAMPLE_VALUE_FIELDS, FIELD_DESCRIPTIONS
+from scoutoss_common.xnat_session import XnatSessionAuth
 
 log = structlog.get_logger(__name__)
 
@@ -119,7 +120,7 @@ class XnatPipelines:
     ) -> None:
         self.http = httpx.Client(
             base_url=base_url.rstrip("/"),
-            auth=(user, password),
+            auth=XnatSessionAuth(base_url, user, password),
             timeout=60,
             transport=transport,
             headers={"Accept": "application/json"},

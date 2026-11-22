@@ -1,8 +1,8 @@
 {
   "name": "scoutoss-qc",
   "label": "ScoutOSS QC",
-  "description": "Per-scan image QC statistics, stored as an xnat:qcAssessmentData assessor.",
-  "version": "0.1.0",
+  "description": "Per-scan image QC statistics, stored as an xnat:qcAssessmentData assessor and as a DICOM summary page in the AI_DICOM resource.",
+  "version": "0.2.0",
   "schema-version": "1.0",
   "info-url": "https://github.com/scoutoss/scoutoss/tree/main/services/pipelines/qc",
   "image": "scoutoss/qc:0.1.0",
@@ -21,7 +21,8 @@
     {"name": "PROJECT", "type": "string", "required": true, "replacement-key": "#PROJECT#"}
   ],
   "outputs": [
-    {"name": "qc-assessor", "description": "QC assessor XML", "required": true, "mount": "out", "path": "qc.xml"}
+    {"name": "qc-assessor", "description": "QC assessor XML", "required": true, "mount": "out", "path": "qc.xml"},
+    {"name": "qc-dicom", "description": "DICOM result objects for export", "required": false, "mount": "out", "path": "dicom"}
   ],
   "xnat": [
     {
@@ -43,7 +44,9 @@
       ],
       "output-handlers": [
         {"name": "qc-assessor-handler", "accepts-command-output": "qc-assessor",
-         "as-a-child-of": "session", "type": "Assessor", "label": "ScoutOSS QC"}
+         "as-a-child-of": "session", "type": "Assessor", "label": "ScoutOSS QC"},
+        {"name": "qc-dicom-handler", "accepts-command-output": "qc-dicom",
+         "as-a-child-of": "session", "type": "Resource", "label": "AI_DICOM"}
       ]
     }
   ]

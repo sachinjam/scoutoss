@@ -27,6 +27,7 @@ ACTIONS = frozenset(
         "cohort_save",
         "cohort_read",
         "pipeline_launch",
+        "dicom_export",
         "reindex",
         "clinical_ingest",
         "login",

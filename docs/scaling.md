@@ -98,6 +98,9 @@ forwards per association. Tens of millions of images through it is too slow for 
 * PostgreSQL: highly available, sized for XNAT's catalogue; tune XNAT heap.
 * Pipelines: the Container Service Kubernetes backend; replace the 200-session
   `MAX_PIPELINE_SESSIONS` limit with a queue.
+* DICOM export (`dicom_export.py`): it lists the `AI_DICOM` resource of every session on each
+  cycle (one request per session). Trigger it from the Container Service's completion event, or
+  list only sessions with a finished container, and send sessions in parallel.
 * XNAT project access sync (`xnat_access.py`): it lists all Keycloak users and each project's
   members every few seconds; lengthen the interval or switch to Keycloak admin events.
 

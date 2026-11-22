@@ -349,6 +349,57 @@ services:
       retries: 8
       start_period: 60s
 
+  # Sends AI results that pipelines leave in the session resource AI_DICOM to a DICOM destination.
+  # Point DICOM_EXPORT_HOST / _PORT / _AE at a research PACS; the default is the dev server below.
+  # Objects go out exactly as de-identified as XNAT holds them (no re-identification).
+  dicom-export:
+    <<: *hardening
+    image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}
+    command: ["scoutoss-indexer", "dicom-export"]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      <<: *python-env
+      DATABASE_URL: postgresql://scout_app:${SCOUT_APP_DB_PASSWORD}@scout-db:5432/scoutoss
+      XNAT_USER: scout_indexer
+      XNAT_PASSWORD: ${XNAT_INDEXER_PASSWORD}
+      DICOM_EXPORT_HOST: ${DICOM_EXPORT_HOST:-dicom-dest}
+      DICOM_EXPORT_PORT: ${DICOM_EXPORT_PORT:-4242}
+      DICOM_EXPORT_AE: ${DICOM_EXPORT_AE:-RESEARCHPACS}
+      DICOM_EXPORT_CALLING_AE: ${DICOM_EXPORT_CALLING_AE:-SCOUTOSS}
+      DICOM_EXPORT_SECONDS: "10"
+    labels: { scoutoss.service: dicom-export }
+    depends_on:
+      scout-db: { condition: service_healthy }
+      opensearch: { condition: service_healthy }
+      xnat-setup: { condition: service_completed_successfully }
+      dicom-dest: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys;sys.exit(time.time()-os.path.getmtime('/tmp/dicom-export.ok')>300)"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+
+  # Dev stand-in for the DICOM destination (a research PACS): Orthanc, AE RESEARCHPACS. Its DICOM
+  # port is reachable only inside the compose network; the web UI is on localhost with a login.
+  dicom-dest:
+    <<: *hardening
+    image: orthancteam/orthanc:25.9.0
+    ports:
+      - "127.0.0.1:${ORTHANC_PORT:-28042}:8042"
+    environment:
+      ORTHANC__NAME: ScoutOSS dev research PACS
+      ORTHANC__DICOM_AET: RESEARCHPACS
+      ORTHANC__DICOM_CHECK_CALLED_AET: "true"
+      ORTHANC__DICOM_ALWAYS_ALLOW_FIND: "true"   # dicom-export verifies its sends with C-FIND
+      ORTHANC__OVERWRITE_INSTANCES: "true"       # a re-run result replaces the earlier one
+      ORTHANC__AUTHENTICATION_ENABLED: "true"
+      ORTHANC__REGISTERED_USERS: '{"scout": "${ORTHANC_PASSWORD}"}'
+    labels: { scoutoss.service: dicom-dest }
+    volumes:
+      - dicom-dest:/var/lib/orthanc/db
+
   deid-gateway:
     <<: *hardening
     build: { context: ., dockerfile: services/indexer/Dockerfile }
@@ -579,6 +630,7 @@ volumes:
   job-engine:
   opensearch:
   gateway-spool:
+  dicom-dest:
   mirth-appdata:
   prometheus:
   grafana:

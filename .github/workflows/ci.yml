@@ -83,7 +83,11 @@ jobs:
       - uses: azure/setup-helm@v4
         with: { version: v3.18.4 }
       - run: helm lint helm/scoutoss
-      - run: helm template scoutoss helm/scoutoss > /tmp/rendered.yaml
+      # optional components on, so their templates are rendered and validated too
+      - run: >
+          helm template scoutoss helm/scoutoss
+          --set dicomExport.enabled=true --set dicomExport.host=pacs.example.org
+          --set dicomExport.aeTitle=RESEARCHPACS > /tmp/rendered.yaml
       - name: kubeconform
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz

@@ -1,0 +1,61 @@
+{{- if .Values.dicomExport.enabled }}
+{{- $name := "dicom-export" }}
+# Sends AI results that pipelines leave in the XNAT session resource AI_DICOM to one DICOM
+# destination (C-STORE). Objects leave exactly as de-identified as XNAT holds them; anything that
+# is not in the session's own study or does not carry a ScoutOSS pseudonym is refused. Every send
+# is audited first. It accepts no inbound traffic.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: 1          # one sender; a second would send the same objects twice
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: export
+          image: {{ include "scoutoss.image" (dict "root" . "name" "indexer") }}
+          args: ["scoutoss-indexer", "dicom-export"]
+          env:
+            {{- include "scoutoss.commonEnv" . | nindent 12 }}
+            - { name: XNAT_USER, value: scout_indexer }
+            - name: XNAT_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: XNAT_INDEXER_PASSWORD } }
+            {{- include "scoutoss.secretEnv" (dict "root" $ "key" "SCOUT_APP_DB_PASSWORD") | nindent 12 }}
+            - name: DATABASE_URL
+              value: {{ include "scoutoss.pgUrl" (dict "root" . "user" "scout_app" "passwordVar" "SCOUT_APP_DB_PASSWORD") | quote }}
+            - { name: DICOM_EXPORT_HOST, value: {{ required "dicomExport.host is required when dicomExport.enabled" .Values.dicomExport.host | quote }} }
+            - { name: DICOM_EXPORT_PORT, value: {{ .Values.dicomExport.port | quote }} }
+            - { name: DICOM_EXPORT_AE, value: {{ required "dicomExport.aeTitle is required when dicomExport.enabled" .Values.dicomExport.aeTitle | quote }} }
+            - { name: DICOM_EXPORT_CALLING_AE, value: {{ .Values.dicomExport.callingAeTitle | quote }} }
+            - { name: DICOM_EXPORT_RESOURCE, value: {{ .Values.dicomExport.resource | quote }} }
+            - { name: DICOM_EXPORT_SECONDS, value: {{ .Values.dicomExport.intervalSeconds | quote }} }
+            - { name: DICOM_EXPORT_HEARTBEAT, value: /tmp/dicom-export.ok }
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources: {{- toYaml .Values.dicomExport.resources | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          # No HTTP port: the loop touches a heartbeat file after every cycle that reached XNAT
+          # (also while the destination is down: a restart does not bring a PACS back).
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os,sys,time;sys.exit(time.time()-os.path.getmtime('/tmp/dicom-export.ok')>{{ .Values.dicomExport.staleAfterSeconds }})"
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes: [{ name: tmp, emptyDir: { sizeLimit: 16Mi } }]
+{{- end }}

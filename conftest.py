@@ -25,6 +25,15 @@ from tests.support.fake_opensearch import FakeOpenSearch  # noqa: E402
 ISSUER = "https://auth.test/realms/scoutoss"
 
 
+@pytest.fixture(autouse=True)
+def xnat_logged_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """XNAT clients start with an open session, so tests only mock the calls they care about.
+    The login itself is covered in services/common/tests/test_xnat_session.py."""
+    from scoutoss_common.xnat_session import XnatSessionAuth
+
+    monkeypatch.setattr(XnatSessionAuth, "session_id", "test-session")
+
+
 @pytest.fixture
 def salt() -> bytes:
     return b"test-site-salt-not-a-secret"
