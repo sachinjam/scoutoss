@@ -6,6 +6,7 @@ Steps (each prints one JSON line; any failure exits non-zero):
   index     its study document is in OpenSearch (within the 60 s budget)
   dashboard the same document is found through OpenSearch Dashboards
   copilot   "how many CT studies" -> count >= 1, cross-modal question answered
+  auto-run  the pushed study gets its QC result without anyone launching the pipeline
   pipeline  ScoutOSS QC launched on the cohort -> a QC assessor appears in XNAT
   audit     query + pipeline launch are in the append-only audit index
 """
@@ -90,28 +91,33 @@ def compose_exec(service: str, *cmd: str) -> str:
     ).stdout
 
 
-def export_report(flag: str) -> dict[str, Any]:
-    """``scoutoss-indexer dicom-export --status`` / ``--verify`` (C-FIND at the destination)."""
+def job_report(job: str, flag: str) -> dict[str, Any] | None:
+    """Last JSON line printed by ``scoutoss-indexer <job> <flag>`` in that job's container."""
     done = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "exec",
-            "-T",
-            "dicom-export",
-            "scoutoss-indexer",
-            "dicom-export",
-            flag,
-        ],
+        ["docker", "compose", "exec", "-T", job, "scoutoss-indexer", job, flag],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
     lines = [line for line in done.stdout.splitlines() if line.startswith("{")]
-    report: dict[str, Any] = (
-        json.loads(lines[-1]) if lines else {"sessions_sent": [], "missing": ["?"]}
-    )
-    return report
+    return json.loads(lines[-1]) if lines else None
+
+
+def export_report(flag: str) -> dict[str, Any]:
+    """``dicom-export --status`` / ``--verify`` (C-FIND at the destination)."""
+    return job_report("dicom-export", flag) or {"sessions_sent": [], "missing": ["?"]}
+
+
+def auto_launched(pipeline: str) -> list[str]:
+    """Sessions the auto-run job launched ``pipeline`` on."""
+    report = job_report("auto-run", "--status") or {}
+    return list(report.get(pipeline, {}).get("sessions_launched", []))
+
+
+def qc_assessor(experiment: str) -> dict[str, Any] | None:
+    rows = xnat(f"/data/experiments/{experiment}/assessors?format=json")["ResultSet"]["Result"]
+    qc = [r for r in rows if "qcAssessmentData" in r.get("xsiType", "")]
+    return qc[0] if qc else None
 
 
 def xnat(path: str) -> Any:
@@ -285,6 +291,27 @@ def main() -> int:
     )
 
     if not args.skip_pipeline:
+        pushed = sessions[0]["ID"]
+
+        def auto_run() -> Any:
+            # nobody launched anything yet: the auto-run job starts QC when a study is archived.
+            # Wait for every study it started (the seeded ones too), so the cohort launch below
+            # is a clean second run and not a race with the first.
+            started = auto_launched("scoutoss-qc-session")
+            if pushed not in started or not all(qc_assessor(exp) for exp in started):
+                return None
+            return started
+
+        started = wait("auto-run", auto_run, time.time() + args.pipeline_timeout, every=5)
+        step(
+            "auto-run",
+            bool(started),
+            experiment=pushed,
+            sessions=len(started or []),
+            **({} if started else {"launched": auto_launched("scoutoss-qc-session")}),
+            **({} if started else pipeline_diagnostics()),
+        )
+
         target = client.post(
             f"{api}/query",
             json={"question": "female patients with CT chest", "session_id": "e2e-p"},
@@ -310,14 +337,8 @@ def main() -> int:
         def assessors() -> Any:
             # every launched session must get its assessor: concurrent uploads used to fail for
             # some of them, and checking only the first let that pass by luck
-            found_all = []
-            for exp in experiments:
-                rows = xnat(f"/data/experiments/{exp}/assessors?format=json")["ResultSet"]["Result"]
-                qc = [r for r in rows if "qcAssessmentData" in r.get("xsiType", "")]
-                if not qc:
-                    return None
-                found_all.append(qc[0])
-            return found_all
+            found_all = [qc_assessor(exp) for exp in experiments]
+            return found_all if all(found_all) else None
 
         found = wait("assessor", assessors, time.time() + args.pipeline_timeout, every=5)
         step(

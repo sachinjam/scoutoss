@@ -9,8 +9,13 @@ run by the XNAT Container Service.
 ```
 modality ─C-STORE─▶ de-id gateway ─▶ XNAT ─▶ indexer ─▶ OpenSearch ◀─ copilot ◀─ UI
 EHR ─HL7─▶ Mirth ───────────────────────────▶ indexer ─▶ clinical_events ┘
-XNAT ─▶ AI container ─▶ result (DICOM) ─▶ dicom-export ─C-STORE─▶ research PACS / DICOM server
+XNAT ─▶ auto-run ─▶ AI container ─▶ result (DICOM) ─▶ dicom-export ─C-STORE─▶ research PACS / DICOM server
 ```
+
+Pipelines can start by themselves: the `auto-run` service launches the pipelines named in
+`AUTO_RUN_PIPELINES` (in the dev stack the QC pipeline) on every study when it arrives, once per
+study. Studies already in XNAT when it is switched on are left alone; see the
+[runbook](docs/runbook.md#auto-run-pipelines-when-a-study-arrives).
 
 AI results can be returned over DICOM: a pipeline writes DICOM objects into the session resource
 `AI_DICOM` and the `dicom-export` service sends them to a configured DICOM destination (in the dev
@@ -23,7 +28,7 @@ Results stay de-identified; see the [runbook](docs/runbook.md#dicom-export-of-ai
 make up      # generates .env + dev TLS certs, fetches XNAT plugins, boots and bootstraps everything
 make seed    # 10 synthetic fake-PHI studies (7 patients) + 13 HL7 messages
              # make seed CASES=100 -> 100 generated patients (136 studies) with matching HL7
-make e2e     # C-STORE → XNAT → searchable < 60 s → copilot → pipeline → assessor → DICOM export → audit → SSO → UI in a browser
+make e2e     # C-STORE → XNAT → searchable < 60 s → auto-run → copilot → pipeline → assessor → DICOM export → audit → SSO → UI in a browser
 ```
 
 Open https://app.localhost:24443 in Chrome or Firefox (Safari needs an `/etc/hosts` entry, see the

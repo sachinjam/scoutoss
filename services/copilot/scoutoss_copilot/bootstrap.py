@@ -7,9 +7,10 @@ from psycopg_pool import ConnectionPool
 
 from scoutoss_common.audit import AuditLogger
 from scoutoss_common.auth import JWTValidator
+from scoutoss_common.xnat_pipelines import XnatPipelines
 from scoutoss_copilot import SERVICE_NAME
 from scoutoss_copilot.app import CopilotDeps
-from scoutoss_copilot.clients import SchemaClient, ServiceToken, XnatPipelines
+from scoutoss_copilot.clients import SchemaClient, ServiceToken
 from scoutoss_copilot.cohorts import ConversationMemory, PostgresCohortRepo
 from scoutoss_copilot.executor import Executor
 from scoutoss_copilot.llm import build_provider

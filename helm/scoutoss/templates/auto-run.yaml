@@ -1,0 +1,56 @@
+{{- if .Values.autoRun.enabled }}
+{{- $name := "auto-run" }}
+# Launches the listed pipelines on a study when it arrives (XNAT has archived its session): once
+# per session, paced, each launch audited first. Studies already in XNAT when a pipeline is first
+# listed are not run unless autoRun.runExisting is set. It accepts no inbound traffic.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "scoutoss.fullname" . }}-{{ $name }}
+  labels: {{- include "scoutoss.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: 1          # one launcher; a second could launch the same session twice
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "scoutoss.selector" (dict "root" . "name" $name) | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: auto-run
+          image: {{ include "scoutoss.image" (dict "root" . "name" "indexer") }}
+          args: ["scoutoss-indexer", "auto-run"]
+          env:
+            {{- include "scoutoss.commonEnv" . | nindent 12 }}
+            - { name: XNAT_USER, value: scout_pipeline }
+            - name: XNAT_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: XNAT_PIPELINE_PASSWORD } }
+            {{- include "scoutoss.secretEnv" (dict "root" $ "key" "SCOUT_APP_DB_PASSWORD") | nindent 12 }}
+            - name: DATABASE_URL
+              value: {{ include "scoutoss.pgUrl" (dict "root" . "user" "scout_app" "passwordVar" "SCOUT_APP_DB_PASSWORD") | quote }}
+            - { name: AUTO_RUN_PIPELINES, value: {{ required "autoRun.pipelines is required when autoRun.enabled" .Values.autoRun.pipelines | quote }} }
+            - { name: AUTO_RUN_EXISTING, value: {{ ternary "run" "skip" .Values.autoRun.runExisting | quote }} }
+            - { name: AUTO_RUN_SECONDS, value: {{ .Values.autoRun.intervalSeconds | quote }} }
+            - { name: AUTO_RUN_HEARTBEAT, value: /tmp/auto-run.ok }
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources: {{- toYaml .Values.autoRun.resources | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          # No HTTP port: the loop touches a heartbeat file after every cycle that reached XNAT.
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os,sys,time;sys.exit(time.time()-os.path.getmtime('/tmp/auto-run.ok')>{{ .Values.autoRun.staleAfterSeconds }})"
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes: [{ name: tmp, emptyDir: { sizeLimit: 16Mi } }]
+{{- end }}

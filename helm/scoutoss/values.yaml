@@ -146,6 +146,18 @@ xnatAccessSync:
     requests: { cpu: 25m, memory: 96Mi }
     limits: { cpu: 250m, memory: 256Mi }
 
+# Launches pipelines on a study when it arrives, without anyone asking. Off until pipelines are
+# named. Each pipeline must be a session-level wrapper that is enabled in the project.
+autoRun:
+  enabled: false
+  pipelines: ""            # e.g. "scoutoss-qc-session" or "scoutoss-qc-session,other:CT+MR"
+  runExisting: false       # true: also run studies already in XNAT when a pipeline is first listed
+  intervalSeconds: 30
+  staleAfterSeconds: 600   # restart the pod if no cycle has reached XNAT for this long
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
+    limits: { cpu: 250m, memory: 256Mi }
+
 # Sends AI results (XNAT session resource AI_DICOM) to a DICOM destination by C-STORE.
 # Off until a destination is named. Results stay de-identified: use a research PACS or viewer,
 # not the clinical PACS. The destination must accept the calling AE title.

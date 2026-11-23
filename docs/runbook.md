@@ -122,6 +122,32 @@ If results are missing, look at `/xapi/containers` in XNAT: a record stuck in `C
 docker ps -a`) was missed. `POST /xapi/containers/{id}/finalize` as an XNAT admin uploads its
 output. Do not finalize a container that is still running.
 
+### Auto-run: pipelines when a study arrives
+`auto-run` launches the pipelines named in `AUTO_RUN_PIPELINES` on each study once XNAT has
+archived it. The dev stack runs `scoutoss-qc-session`; set `AUTO_RUN_PIPELINES` in `.env` and
+`docker compose up -d auto-run` to change it (`none` switches it off). In Helm:
+`autoRun.enabled`, `autoRun.pipelines`.
+
+```bash
+docker compose exec auto-run scoutoss-indexer auto-run --status   # launched / skipped / error
+```
+
+* Names are session-level wrapper names (`/xapi/commands/available?project=...`), comma-separated.
+  `name:CT+MR` limits a pipeline to those session types. The pipeline has to be enabled in the
+  project; a study that arrives in a project where it is not enabled is skipped for good.
+* **Existing studies are not run.** When a pipeline is first listed, every study already in XNAT
+  is recorded as skipped. `AUTO_RUN_EXISTING=run` (Helm `autoRun.runExisting`) before that first
+  start runs them all instead; for a part of the archive, launch the pipeline on a cohort.
+* A pipeline runs once per study. To run a study again, launch it on a cohort, or delete its row:
+  `DELETE FROM indexer.auto_run WHERE experiment_id = '...'`.
+* `error` is a launch XNAT refused, retried up to `AUTO_RUN_MAX_ATTEMPTS` (3) times; the reason
+  is in `indexer.auto_run.detail`. Whether the container then produced a result is XNAT's record
+  (see above), not this one.
+* A study counts as arrived when XNAT archives it, after the prearchive quiet period
+  (`sessionXmlRebuilderInterval`, one minute in the dev stack). Images that arrive later are
+  merged into the session but do not start the pipeline again.
+* Every launch is in the audit trail as `pipeline_launch` by `service:auto-run`.
+
 ### DICOM export of AI results
 `dicom-export` sends what pipelines leave in the session resource `AI_DICOM` to one DICOM
 destination. Set `DICOM_EXPORT_HOST`, `DICOM_EXPORT_PORT`, `DICOM_EXPORT_AE` (the destination's AE

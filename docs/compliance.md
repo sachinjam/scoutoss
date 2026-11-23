@@ -115,6 +115,7 @@ the IdP; XNAT keeps its own access logs.
 | Contingency plan / backup | 164.308(a)(7) | Art. 32(1)(c) | runbook backup/restore, RPO/RTO, quarterly restore test |
 | Security management / vulnerabilities | 164.308(a)(1) | Art. 32(1)(d) | CI: Trivy image + config scans, pinned images, non-root containers, mypy/ruff gates |
 | Re-identification | 164.514(c) | Art. 11 | only via the vault (role `deid_svc` + key escrow), outside the research zone; honest-broker procedure |
+| Automated processing | 164.312(b) | Art. 30, 32 | `auto-run` launches only the configured pipelines, inside the isolated job engine, on studies as they arrive; each launch is audited first (`pipeline_launch`, user `service:auto-run`) and nothing is launched if the trail is unavailable |
 | Disclosure of AI results over DICOM | 164.502(b), 164.514(a) | Art. 5(1)(c), 32 | `dicom-export` sends only objects in the session's own study that carry a ScoutOSS pseudonym, to one configured destination; each send is audited first (`dicom_export`, user `service:dicom-export`) and nothing is sent if the trail is unavailable; no re-identification |
 
 ## Container hardening exceptions (dev compose)

@@ -1,6 +1,7 @@
 """CLI: ``serve`` (API + worker), ``index-folder`` (one-shot bulk load), ``gateway``,
-``xnat-access-sync`` (Keycloak project groups -> XNAT project roles), ``dicom-export`` (AI
-results in XNAT -> a DICOM destination), ``loadtest`` (synthetic index-only data for scale
+``xnat-access-sync`` (Keycloak project groups -> XNAT project roles), ``auto-run`` (launch
+pipelines on studies as they arrive), ``dicom-export`` (AI results in XNAT -> a DICOM
+destination), ``loadtest`` (synthetic index-only data for scale
 testing)."""
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ def main(argv: list[str] | None = None) -> int:
     folder.add_argument("--project", default=os.getenv("DEFAULT_PROJECT", "FOLDER"))
     sub.add_parser("gateway", help="run the DICOM de-identification gateway")
     sub.add_parser("xnat-access-sync", help="mirror Keycloak project groups into XNAT roles")
+    auto = sub.add_parser("auto-run", help="launch pipelines on studies as they arrive")
+    auto.add_argument("--status", action="store_true", help="print what was launched")
     export = sub.add_parser("dicom-export", help="send AI results in XNAT to a DICOM destination")
     export.add_argument("--status", action="store_true", help="print what has been sent")
     export.add_argument("--verify", action="store_true", help="check the destination has it")
@@ -40,6 +43,11 @@ def main(argv: list[str] | None = None) -> int:
         from scoutoss_indexer.xnat_access import main as access_main
 
         return access_main()
+
+    if args.cmd == "auto-run":
+        from scoutoss_indexer.auto_run import main as auto_main
+
+        return auto_main(["--status"] if args.status else [])
 
     if args.cmd == "dicom-export":
         from scoutoss_indexer.dicom_export import main as export_main

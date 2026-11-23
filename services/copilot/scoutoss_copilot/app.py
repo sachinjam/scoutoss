@@ -22,8 +22,8 @@ from scoutoss_common.audit import AuditError, AuditLogger
 from scoutoss_common.auth import JWTValidator, Principal, make_auth_dependency, require_roles
 from scoutoss_common.catalog import STUDIES_INDEX
 from scoutoss_common.web import client_ip, install_observability
+from scoutoss_common.xnat_pipelines import PipelineError, XnatPipelines
 from scoutoss_copilot import SERVICE_NAME
-from scoutoss_copilot.clients import PipelineError, XnatPipelines
 from scoutoss_copilot.executor import MAX_MEMBERS, ExecutionError, paged_hits
 from scoutoss_copilot.llm import LLMError, PHILeakError
 from scoutoss_copilot.plan import PlanValidationError

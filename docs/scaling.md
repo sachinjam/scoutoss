@@ -101,6 +101,9 @@ forwards per association. Tens of millions of images through it is too slow for 
 * DICOM export (`dicom_export.py`): it lists the `AI_DICOM` resource of every session on each
   cycle (one request per session). Trigger it from the Container Service's completion event, or
   list only sessions with a finished container, and send sessions in parallel.
+* Auto-run (`auto_run.py`): it lists every session and reads its whole state table on each
+  cycle; list incrementally or trigger it from the XNAT session-archived event. Launch pacing
+  (four a second) bounds how fast a bulk import is processed.
 * XNAT project access sync (`xnat_access.py`): it lists all Keycloak users and each project's
   members every few seconds; lengthen the interval or switch to Keycloak admin events.
 

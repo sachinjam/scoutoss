@@ -349,6 +349,35 @@ services:
       retries: 8
       start_period: 60s
 
+  # Launches pipelines on a study when it arrives (XNAT has archived its session), once per
+  # session, paced and audited like a cohort launch. AUTO_RUN_PIPELINES: wrapper names, optionally
+  # limited to modalities ("scoutoss-qc-session,other:CT+MR"); set it to "none" to switch it off.
+  auto-run:
+    <<: *hardening
+    image: scoutoss/indexer:${SCOUTOSS_TAG:-dev}
+    command: ["scoutoss-indexer", "auto-run"]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      <<: *python-env
+      DATABASE_URL: postgresql://scout_app:${SCOUT_APP_DB_PASSWORD}@scout-db:5432/scoutoss
+      XNAT_USER: scout_pipeline
+      XNAT_PASSWORD: ${XNAT_PIPELINE_PASSWORD}
+      AUTO_RUN_PIPELINES: ${AUTO_RUN_PIPELINES:-scoutoss-qc-session}
+      AUTO_RUN_EXISTING: ${AUTO_RUN_EXISTING:-skip}
+      AUTO_RUN_SECONDS: "10"
+    labels: { scoutoss.service: auto-run }
+    depends_on:
+      scout-db: { condition: service_healthy }
+      opensearch: { condition: service_healthy }
+      xnat-setup: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time,sys;sys.exit(time.time()-os.path.getmtime('/tmp/auto-run.ok')>300)"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+
   # Sends AI results that pipelines leave in the session resource AI_DICOM to a DICOM destination.
   # Point DICOM_EXPORT_HOST / _PORT / _AE at a research PACS; the default is the dev server below.
   # Objects go out exactly as de-identified as XNAT holds them (no re-identification).

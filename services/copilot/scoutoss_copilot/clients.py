@@ -11,7 +11,6 @@ import httpx
 import structlog
 
 from scoutoss_common.catalog import EXAMPLE_VALUE_FIELDS, FIELD_DESCRIPTIONS
-from scoutoss_common.xnat_session import XnatSessionAuth
 
 log = structlog.get_logger(__name__)
 
@@ -101,66 +100,3 @@ class SchemaClient:
             log.warning("live schema unavailable; using static catalog", error=type(exc).__name__)
         self._cache = (time.time(), schema)
         return schema
-
-
-class PipelineError(RuntimeError):
-    pass
-
-
-class XnatPipelines:
-    """Launch XNAT Container Service wrappers on imaging sessions."""
-
-    def __init__(
-        self,
-        base_url: str,
-        user: str,
-        password: str,
-        *,
-        transport: httpx.BaseTransport | None = None,
-    ) -> None:
-        self.http = httpx.Client(
-            base_url=base_url.rstrip("/"),
-            auth=XnatSessionAuth(base_url, user, password),
-            timeout=60,
-            transport=transport,
-            headers={"Accept": "application/json"},
-        )
-
-    def wrappers(self, project: str) -> list[dict[str, Any]]:
-        """Session-level pipelines enabled in ``project`` (readable by project members;
-        the per-wrapper ``/enabled`` endpoint needs owner rights)."""
-        resp = self.http.get(
-            "/xapi/commands/available",
-            params={"project": project, "xsiType": "xnat:imageSessionData"},
-        )
-        resp.raise_for_status()
-        return [
-            {
-                "id": w["wrapper-id"],
-                "name": w["wrapper-name"],
-                "label": w.get("wrapper-label") or w["wrapper-name"],
-                "description": w.get("wrapper-description", ""),
-                "contexts": w.get("wrapper-contexts", []),
-                "image": w.get("image-name"),
-                "root": w.get("root-element-name", "session"),
-            }
-            for w in resp.json()
-            if w.get("enabled")
-        ]
-
-    def launch(self, project: str, wrapper: dict[str, Any], experiment_id: str) -> dict[str, Any]:
-        if "xnat:imageSessionData" not in wrapper.get("contexts", []):
-            raise PipelineError("pipeline does not run at session level")
-        resp = self.http.post(
-            f"/xapi/projects/{project}/wrappers/{wrapper['id']}/root/session/launch",
-            json={"session": f"/archive/experiments/{experiment_id}"},  # XNAT requires JSON
-        )
-        if resp.status_code >= 400:
-            raise PipelineError(f"launch failed with HTTP {resp.status_code}")
-        body: dict[str, Any] = resp.json() if resp.content else {}
-        return {
-            "experiment_id": experiment_id,
-            "status": body.get("status", "submitted"),
-            "workflow_id": body.get("workflow-id") or body.get("workflowid"),
-            "container_id": body.get("container-id"),
-        }

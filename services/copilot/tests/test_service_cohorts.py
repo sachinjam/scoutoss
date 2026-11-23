@@ -10,13 +10,8 @@ import pytest
 import respx
 
 from scoutoss_common.phi import redact_text
-from scoutoss_copilot.clients import (
-    PipelineError,
-    SchemaClient,
-    ServiceToken,
-    XnatPipelines,
-    static_schema,
-)
+from scoutoss_common.xnat_pipelines import PipelineError, XnatPipelines
+from scoutoss_copilot.clients import SchemaClient, ServiceToken, static_schema
 from scoutoss_copilot.cohorts import ConversationMemory, MemoryCohortRepo, new_cohort
 from scoutoss_copilot.heuristic import HeuristicPlanner
 from scoutoss_copilot.llm import FakeLLM

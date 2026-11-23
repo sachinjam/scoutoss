@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 
 from scoutoss_common.audit import AuditLogger
 from scoutoss_common.auth import JWTValidator
+from scoutoss_common.xnat_pipelines import XnatPipelines
 from scoutoss_copilot.app import CopilotDeps, create_app
-from scoutoss_copilot.clients import XnatPipelines
 from scoutoss_copilot.executor import ExecutionError
 from scoutoss_copilot.heuristic import HeuristicPlanner
 from scoutoss_copilot.llm import FakeLLM, LLMError

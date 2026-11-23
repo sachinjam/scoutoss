@@ -136,6 +136,25 @@ the caller's projects) and launches a Container Service wrapper per session on t
 job engine. `scoutoss-qc` writes an `xnat:qcAssessmentData` assessor; `totalsegmentator`
 writes a `TOTALSEG` NIfTI resource per CT scan.
 
+### Auto-run
+
+`auto-run` (`services/indexer/scoutoss_indexer/auto_run.py`, its own service) launches pipelines
+without a person asking. Every few seconds it lists the archived sessions in XNAT (one request)
+and, for each session it has no record of in `indexer.auto_run`, launches each pipeline named in
+`AUTO_RUN_PIPELINES` with the same Container Service call the cohort launch uses
+(`scoutoss_common/xnat_pipelines.py`), as the `scout_pipeline` account.
+
+* "Arrived" means archived: XNAT archives a session once no more images have come in for its
+  prearchive quiet period, so a study is not processed while it is still being received.
+* One launch per session and pipeline, recorded in Postgres. A failed launch is retried three
+  times; an unreachable XNAT uses up no attempt.
+* Sessions that exist when a pipeline is first listed are recorded as skipped, so switching
+  auto-run on does not start a job for every study already in the archive.
+* A pipeline that is not enabled in the session's project, or whose modality filter does not
+  match, is skipped for that session.
+* Launches are paced (`PIPELINE_LAUNCH_INTERVAL_SECONDS`) and audited first as `pipeline_launch`
+  by `service:auto-run`; no audit trail, no launch.
+
 ### Returning results over DICOM
 
 A pipeline that wants its result sent on writes DICOM objects into the session resource
